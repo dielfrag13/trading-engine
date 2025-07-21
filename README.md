@@ -59,3 +59,7 @@ sudo apt-get install -y \
     valgrind               \  # memory checking
 ```
 
+```
+sudo apt-get update && apt-get install -y build-essential cmake ninja-build libboost-all-dev libspdlog-dev nlohmann-json-dev libcurl4-openssl-dev libwebsocketpp-dev libssl-dev pkg-config
+```
+
