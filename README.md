@@ -39,3 +39,23 @@ stock bot try 2
     - `EngineTests.cpp`
     - `PluginLoaderTests.cpp`
 
+# required packages
+```
+sudo apt-get update
+sudo apt-get install -y \
+    build-essential        \  # g++, make, etc.
+    cmake                  \  # CMake + ctest
+    ninja-build            \  # optional faster builds
+    libboost-all-dev       \  # Boost libraries (Asio, filesystem, etc.)
+    nlohmann-json3-dev     \  # JSON parsing
+    libspdlog-dev          \  # Logging
+    libcurl4-openssl-dev   \  # REST client (cURL)
+    libwebsocketpp-dev     \  # WebSocket++
+    libssl-dev             \  # TLS support
+    pkg-config             \  # helps CMake find libs
+    clang                  \  # if you wanna try Clang
+    clang-format           \  # for code linting
+    gdb                    \  # debugger
+    valgrind               \  # memory checking
+```
+
