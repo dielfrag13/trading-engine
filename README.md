@@ -63,3 +63,19 @@ sudo apt-get install -y \
 sudo apt-get update && apt-get install -y build-essential cmake ninja-build libboost-all-dev libspdlog-dev nlohmann-json-dev libcurl4-openssl-dev libwebsocketpp-dev libssl-dev pkg-config
 ```
 
+# To build the project:
+```
+# from your project root
+mkdir -p build && cd build
+
+# configure
+cmake .. -DCMAKE_BUILD_TYPE=Release
+
+# build everything (engine libs, pluginloader, support, and any in-tree plugins)
+cmake --build .
+
+# (optional) run tests
+ctest --output-on-failure
+
+```
+
