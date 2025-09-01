@@ -1,5 +1,5 @@
 // WebSocketClient.cpp
 
-#include "src/support/WebSocketClient.cpp.hpp"
+#include "support/WebSocketClient.hpp"
 
 // TODO: implement

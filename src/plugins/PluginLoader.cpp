@@ -1,5 +1,5 @@
 // PluginLoader.cpp
 
-#include "src/plugins/PluginLoader.cpp.hpp"
+#include "plugins/PluginLoader.hpp"
 
 // TODO: implement

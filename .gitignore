@@ -39,3 +39,15 @@
 
 # debug information files
 *.dwo
+
+# additional stuff
+*.swp
+
+# ignore build file
+build/*
+
+
+# other stuff? 
+#
+# VSCode?
+.vscode/*
