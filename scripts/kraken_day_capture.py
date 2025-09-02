@@ -19,6 +19,7 @@ import json
 import math
 import sys
 import time
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Iterable, List, Optional, Tuple
 from zoneinfo import ZoneInfo  # ← NEW (stdlib in Python 3.9+)
@@ -45,12 +46,38 @@ KRAKEN_API = "https://api.kraken.com/0/public"
 
 # ---- Helpers ----------------------------------------------------------------
 
-def iso_utc_day_bounds(day_str: str) -> Tuple[float, float]:
-    """Return (start_ts, end_ts) in UNIX seconds for a UTC day like '2025-08-28'."""
-    dt = datetime.strptime(day_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-    start = dt
-    end = dt + timedelta(days=1)
-    return start.timestamp(), end.timestamp()
+
+
+
+
+def parse_duration_to_seconds(expr: str) -> int:
+    """
+    Parse strings like '24h', '6h30m', '90m', '3600s', '1d2h15m10s' (case-insensitive).
+    Returns total seconds as int. Raises ValueError on bad input.
+    """
+    if not expr or not isinstance(expr, str):
+        raise ValueError("empty duration")
+    s = expr.strip().lower()
+    # Allow plain integer = seconds
+    if re.fullmatch(r"\d+", s):
+        return int(s)
+    total = 0
+    for num, unit in re.findall(r"(\d+)\s*([a-z]+)", s):
+        n = int(num)
+        if unit in ("s", "sec", "secs", "second", "seconds"):
+            total += n
+        elif unit in ("m", "min", "mins", "minute", "minutes"):
+            total += n * 60
+        elif unit in ("h", "hr", "hrs", "hour", "hours"):
+            total += n * 3600
+        elif unit in ("d", "day", "days"):
+            total += n * 86400
+        else:
+            raise ValueError(f"unknown unit '{unit}' in duration '{expr}'")
+    if total <= 0:
+        raise ValueError(f"non-positive duration '{expr}'")
+    return total
+
 
 def tz_day_bounds(day_str: str, tz_name: str) -> Tuple[float, float]:
     """
@@ -530,7 +557,9 @@ def main():
                          "Without this, each client gets its own timeline.")
     ap.add_argument("--tz", default="America/New_York",
                 help="Interpret --date in this IANA timezone (default: America/New_York)")
-
+    ap.add_argument("--last",
+        help="Relative lookback like '24h', '6h30m', '90m', '1d2h'. "
+            "If set, ignores --date/--tz and captures [now - duration, now) in UTC.")
     args = ap.parse_args()
 
     # --- websocket replay ---
@@ -549,16 +578,32 @@ def main():
         replay_file(args.replay, pace=args.pace, emit_ticks=args.ticks, symbol=args.symbol)
         return
 
-    # --- capture mode ---
-    missing = [flag for flag in ("pair", "date", "out") if getattr(args, flag) in (None, "")]
-    if missing:
-        ap.error("capture mode requires: --pair --date --out")
 
-    start_ts, end_ts = tz_day_bounds(args.date, args.tz)
-    # Optional: log what that means
-    siso = datetime.fromtimestamp(start_ts, tz=timezone.utc).isoformat()
-    eiso = datetime.fromtimestamp(end_ts, tz=timezone.utc).isoformat()
-    print(f"[i] Window: {args.date} in {args.tz}  →  {siso} to {eiso} UTC", file=sys.stderr)
+
+    # --- determine capture window ---
+    if args.last:
+            # require --pair and --out
+        if not args.pair or not args.out:
+            ap.error("capture mode with --last requires: --pair and --out")
+        try:
+            lookback = parse_duration_to_seconds(args.last)
+        except ValueError as e:
+            ap.error(f"--last {e}")
+        end_ts = time.time()                         # now (UTC)
+        start_ts = end_ts - lookback
+        from datetime import datetime, timezone
+        siso = datetime.fromtimestamp(start_ts, tz=timezone.utc).isoformat()
+        eiso = datetime.fromtimestamp(end_ts,   tz=timezone.utc).isoformat()
+        print(f"[i] Window: last {args.last}  →  {siso} to {eiso} UTC", file=sys.stderr)
+    else:
+        # fallback to calendar day in a timezone (your existing tz_day_bounds)
+        if not args.date or not args.pair or not args.out:
+            ap.error("capture mode requires --pair --out and either --last or --date (optionally --tz)")
+        start_ts, end_ts = tz_day_bounds(args.date, args.tz)
+        from datetime import datetime, timezone
+        siso = datetime.fromtimestamp(start_ts, tz=timezone.utc).isoformat()
+        eiso = datetime.fromtimestamp(end_ts,   tz=timezone.utc).isoformat()
+        print(f"[i] Window: {args.date} in {args.tz}  →  {siso} to {eiso} UTC", file=sys.stderr)
 
 
     with requests.Session() as s:
