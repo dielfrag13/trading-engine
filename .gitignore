@@ -51,3 +51,9 @@ build/*
 #
 # VSCode?
 .vscode/*
+
+# .venv
+.venv/*
+
+# data downloaded
+*.gz

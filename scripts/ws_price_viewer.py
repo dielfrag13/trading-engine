@@ -5,8 +5,10 @@ import json
 import sys
 import threading
 import queue
-from datetime import datetime, timezone
-from zoneinfo import ZoneInfo  # <— NEW
+import time
+from collections import deque
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 
 def _maybe_set_backend(live: bool):
     if not live:
@@ -23,19 +25,29 @@ def _parse_args():
     ap.add_argument("--symbol", help="Optional pair filter (e.g., BTCUSD or XBTUSD)")
     ap.add_argument("--title", default="Price", help="Plot title")
     ap.add_argument("--downsample", type=int, default=1,
-                    help="Plot every Nth point (for huge streams). 1 = plot all.")
-    ap.add_argument("--tz", default="America/New_York",  # <— NEW
-                    help="Target timezone for display (e.g., America/New_York, UTC)")
+                    help="Only attempt a redraw every Nth accepted message")
+    ap.add_argument("--tz", default="America/New_York",
+                    help="Target timezone (e.g., America/New_York, UTC)")
+
+    # NEW: perf & visuals
+    ap.add_argument("--fps", type=float, default=20.0,
+                    help="Max redraws per second (live mode)")
+    ap.add_argument("--max-points", type=int, default=20000,
+                    help="Cap the number of plotted points (live mode)")
+    ap.add_argument("--agg-sec", type=int, default=0,
+                    help="Aggregate to N-second buckets (0 = no aggregation)")
+    ap.add_argument("--grid", dest="grid", action="store_true", default=True,
+                    help="Show subtle vertical grid (default)")
+    ap.add_argument("--no-grid", dest="grid", action="store_false")
+    ap.add_argument("--midnight-line", dest="midnight_line", action="store_true", default=True,
+                    help="Draw a vertical line at local midnight (default)")
+    ap.add_argument("--no-midnight-line", dest="midnight_line", action="store_false")
     return ap.parse_args()
 
 def _iso_to_dt(s: str) -> datetime:
-    try:
-        if s.endswith("Z"):
-            s = s[:-1] + "+00:00"
-        return datetime.fromisoformat(s)  # keep tzinfo from string
-    except Exception:
-        # Fallback; assume UTC
-        return datetime.strptime(s, "%Y-%m-%dT%H:%M:%S%z")
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    return datetime.fromisoformat(s)
 
 def _tick_to_dt(ts_float: float) -> datetime:
     return datetime.fromtimestamp(float(ts_float), tz=timezone.utc)
@@ -87,58 +99,123 @@ def _auto_mode_from_message(msg: dict, default="secbar"):
         return "tick"
     return default
 
-# ---- CHANGED: now converts to target tz before appending
-def _append_point(mode: str, msg: dict, times, prices, target_tz) -> bool:
+def _append_point(mode: str, msg: dict, tz, agg_sec: int, buf_times, buf_prices):
+    """
+    Append a point to buffers (deque) after converting to target tz and applying optional aggregation.
+    Returns True if a visible point was added/updated.
+    """
     if mode == "secbar":
-        ts = msg.get("ts")
-        close = msg.get("close")
+        ts = msg.get("ts"); close = msg.get("close")
         if ts is None or close is None:
             return False
-        dt_utc = _iso_to_dt(ts)  # already aware
-        dt_local = dt_utc.astimezone(target_tz)
-        times.append(dt_local)
-        prices.append(float(close))
-        return True
+        dt_utc = _iso_to_dt(ts)
+        dt_local = dt_utc.astimezone(tz)
+        price = float(close)
     else:  # tick
-        t = msg.get("time")
-        p = msg.get("price")
+        t = msg.get("time"); p = msg.get("price")
         if t is None or p is None:
             return False
         dt_utc = _tick_to_dt(float(t))
-        dt_local = dt_utc.astimezone(target_tz)
-        times.append(dt_local)
-        prices.append(float(p))
+        dt_local = dt_utc.astimezone(tz)
+        price = float(p)
+
+    if agg_sec and agg_sec > 0:
+        # floor to bucket
+        bucket_ts = int(dt_local.timestamp() // agg_sec) * agg_sec
+        bucket_dt = datetime.fromtimestamp(bucket_ts, tz=dt_local.tzinfo)
+        # If last point is in same bucket, update the last value to avoid growing the array
+        if buf_times and buf_times[-1] == bucket_dt:
+            buf_prices[-1] = price
+            return True
+        else:
+            buf_times.append(bucket_dt)
+            buf_prices.append(price)
+            return True
+    else:
+        buf_times.append(dt_local)
+        buf_prices.append(price)
         return True
+
+def _format_range_label(t0: datetime, t1: datetime) -> str:
+    if not t0 or not t1:
+        return ""
+    same_day = (t0.date() == t1.date())
+    tz_abbr = (t0.tzname() or "").strip()
+    if same_day:
+        # 2025-09-01 00:00 — 23:59 EDT
+        return f"{t0.strftime('%Y-%m-%d %H:%M:%S')} — {t1.strftime('%H:%M:%S')} {tz_abbr}".strip()
+    else:
+        # span across days
+        return f"{t0.strftime('%Y-%m-%d %H:%M:%S')} — {t1.strftime('%Y-%m-%d %H:%M:%S')} {tz_abbr}".strip()
+
+def _compute_midnights_between(left: datetime, right: datetime):
+    """
+    Return a list of tz-aware datetimes at local midnight between [left, right].
+    """
+    if left > right:
+        left, right = right, left
+    first_midnight = left.replace(hour=0, minute=0, second=0, microsecond=0)
+    if first_midnight < left:
+        first_midnight = first_midnight + timedelta(days=1)
+    mids = []
+    cur = first_midnight
+    while cur <= right:
+        mids.append(cur)
+        cur = cur + timedelta(days=1)
+    return mids
+
+
 
 def _live_plot_loop(args, q: queue.Queue, stop_evt: threading.Event):
     import matplotlib.pyplot as plt
     from matplotlib.dates import DateFormatter, AutoDateLocator
 
-    tz = _get_tz(args.tz)  # <— NEW
+    tz = _get_tz(args.tz)
 
     plt.ion()
     fig, ax = plt.subplots()
     ax.set_title(args.title)
-    ax.set_xlabel(f"Time ({args.tz})")  # updated when first point arrives
+    ax.set_xlabel(f"Time ({args.tz})")
     ax.set_ylabel("Price")
+
+    # TZ-aware ticks
     locator = AutoDateLocator(tz=tz)
     ax.xaxis.set_major_locator(locator)
     ax.xaxis.set_major_formatter(DateFormatter("%H:%M:%S", tz=tz))
 
-    date_text = fig.text(0.99, 0.98, "", ha="right", va="top")  # <— NEW
+    # Subtle vertical grid
+    if args.grid:
+        ax.grid(axis="x", which="major", linestyle="--", alpha=0.2)
 
-    times, prices = [], []
+    # Date label
+    #date_text = fig.text(0.99, 0.98, "", ha="right", va="top")
+    range_text = fig.text(0.99, 0.95, "", ha="right", va="top")  # NEW: time range
+
+
+
+    # Rolling buffers to keep UI snappy
+    times = deque(maxlen=max(1000, args.max_points))
+    prices = deque(maxlen=max(1000, args.max_points))
     line, = ax.plot([], [], linewidth=1.0)
 
     mode = args.mode
-    have_labeled_date = False  # <— NEW
+    have_labeled_date = False
+    midnight_lines = []
+
+    # Redraw throttle (FPS)
+    min_dt = 1.0 / max(1e-6, args.fps)
+    last_draw = 0.0
+    count_since_draw = 0
 
     try:
         while not stop_evt.is_set():
             try:
                 raw = q.get(timeout=0.05)
             except queue.Empty:
-                plt.pause(0.01)
+                # periodic small refresh helps interactivity
+                if time.monotonic() - last_draw > min_dt:
+                    plt.pause(0.005)
+                    last_draw = time.monotonic()
                 continue
 
             try:
@@ -154,20 +231,58 @@ def _live_plot_loop(args, q: queue.Queue, stop_evt: threading.Event):
                 continue
 
             cur_mode = _auto_mode_from_message(msg) if mode == "auto" else mode
-            if not _append_point(cur_mode, msg, times, prices, tz):
+            if not _append_point(cur_mode, msg, tz, args.agg_sec, times, prices):
                 continue
 
-            # First point: set axis label with actual tz abbreviation and draw date stamp
+            # Ensure axis spans exactly the data range
+            if len(times) >= 2:
+                ax.set_xlim(times[0], times[-1])
+
+            # First point: set axis label and initial date text
             if not have_labeled_date and times:
                 tz_abbr = times[0].tzname() or args.tz
                 ax.set_xlabel(f"Time ({tz_abbr})")
-                date_text.set_text(times[0].strftime("%Y-%m-%d (%a) %Z"))
+                #date_text.set_text(times[0].strftime("%Y-%m-%d (%a) %Z"))
                 have_labeled_date = True
 
-            if args.downsample > 1 and (len(times) % args.downsample != 0):
+            # Update range label continuously
+            if times:
+                range_text.set_text(_format_range_label(times[0], times[-1]))
+
+            # Draw/refresh midnight lines across the visible range
+            if args.midnight_line and len(times) >= 2:
+                needed = _compute_midnights_between(times[0], times[-1])
+                # Build a set of existing x-positions to avoid duplicates
+                existing = set()
+                for ln in midnight_lines:
+                    try:
+                        xdata = ln.get_xdata()
+                        existing.add(xdata[0] if hasattr(xdata, '__iter__') else xdata)
+                    except Exception:
+                        pass
+                # Add any missing midnights
+                for m in needed:
+                    if m not in existing:
+                        midnight_lines.append(ax.axvline(m, linestyle="-", linewidth=1.0, alpha=0.35))
+
+            # Optional extra: move midnight line if the day rolls (unlikely in single-day)
+            # if midnight_line and times[-1].date() != times[0].date():
+            #     new_m = times[-1].replace(hour=0, minute=0, second=0, microsecond=0)
+            #     midnight_line.set_xdata(new_m)
+
+            # Downsample throttle: only attempt redraw every Nth accepted message
+            count_since_draw += 1
+            if args.downsample > 1 and (count_since_draw % args.downsample != 0):
                 continue
 
-            line.set_data(times, prices)
+            # FPS throttle
+            now = time.monotonic()
+            if now - last_draw < min_dt:
+                continue
+            last_draw = now
+
+            # Update visible data (deque → list is cheap, bounded by max_points)
+            line.set_data(list(times), list(prices))
             ax.relim()
             ax.autoscale_view()
             fig.canvas.draw_idle()
@@ -188,10 +303,13 @@ def _headless_collect_and_save(args, q: queue.Queue, stop_evt: threading.Event):
     import matplotlib.pyplot as plt
     from matplotlib.dates import DateFormatter, AutoDateLocator
 
-    tz = _get_tz(args.tz)  # <— NEW
+    tz = _get_tz(args.tz)
 
-    times, prices = [], []
+    # In headless mode we still allow aggregation for faster/smaller plots
+    times = []
+    prices = []
     mode = args.mode
+
     try:
         while not stop_evt.is_set():
             try:
@@ -208,7 +326,28 @@ def _headless_collect_and_save(args, q: queue.Queue, stop_evt: threading.Event):
             if not _filter_symbol(msg, args.symbol):
                 continue
             cur_mode = _auto_mode_from_message(msg) if mode == "auto" else mode
-            _append_point(cur_mode, msg, times, prices, tz)
+
+            # Apply same aggregation rule as live
+            if cur_mode == "secbar":
+                dt_utc = _iso_to_dt(msg.get("ts"))
+                dt_local = dt_utc.astimezone(tz)
+                price = float(msg.get("close"))
+            else:
+                dt_utc = _tick_to_dt(float(msg.get("time")))
+                dt_local = dt_utc.astimezone(tz)
+                price = float(msg.get("price"))
+
+            if args.agg_sec and args.agg_sec > 0:
+                bucket_ts = int(dt_local.timestamp() // args.agg_sec) * args.agg_sec
+                bucket_dt = datetime.fromtimestamp(bucket_ts, tz=dt_local.tzinfo)
+                if times and times[-1] == bucket_dt:
+                    prices[-1] = price
+                else:
+                    times.append(bucket_dt)
+                    prices.append(price)
+            else:
+                times.append(dt_local)
+                prices.append(price)
     except KeyboardInterrupt:
         pass
 
@@ -219,18 +358,31 @@ def _headless_collect_and_save(args, q: queue.Queue, stop_evt: threading.Event):
     fig, ax = plt.subplots()
     ax.set_title(args.title)
     tz_abbr = times[0].tzname() or args.tz
-    ax.set_xlabel(f"Time ({tz_abbr})")  # <— NEW
+    ax.set_xlabel(f"Time ({tz_abbr})")
     ax.set_ylabel("Price")
+
     locator = AutoDateLocator(tz=tz)
     ax.xaxis.set_major_locator(locator)
     ax.xaxis.set_major_formatter(DateFormatter("%H:%M:%S", tz=tz))
+
+    if args.grid:
+        ax.grid(axis="x", which="major", linestyle="--", alpha=0.2)
+
+    # Midnight marker
+    if args.midnight_line:
+        for m in _compute_midnights_between(times[0], times[-1]):
+            ax.axvline(m, linestyle="-", linewidth=1.0, alpha=0.35)
+
+    ax.set_xlim(times[0], times[-1])
     ax.plot(times, prices, linewidth=1.0)
     ax.relim()
     ax.autoscale_view()
 
-    # Date label in the corner
+    # Date label
     fig.text(0.99, 0.98, times[0].strftime("%Y-%m-%d (%a) %Z"),
-             ha="right", va="top")  # <— NEW
+             ha="right", va="top")
+    fig.text(0.99, 0.95, _format_range_label(times[0], times[-1]),
+         ha="right", va="top")
 
     out = args.out or "price.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")
