@@ -45,4 +45,17 @@ python kraken_day_capture.py --replay mixed.jsonl.gz --symbol XBTUSD
 ```
 
 
+# WebSocket price viewer
+
+This will connect to a websocket server from kraken day viewer and draw a graph of the replay.
+
+Live replay:
+```bash
+python ws_price_viewer.py --url ws://127.0.0.1:8765 --live --title "BTCUSD – replay" --tz America/New_York
+```
+
+Headless PNG generation:
+```
+python ws_price_viewer.py --url ws://127.0.0.1:8765 --out btc_day.png --title "BTCUSD – day" --tz America/New_York
+```
 
