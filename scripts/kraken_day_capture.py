@@ -29,6 +29,17 @@ try:
 except Exception:
     pd = None
 
+import asyncio
+try:
+    import websockets
+except Exception:
+    websockets = None
+
+
+
+
+
+
 KRAKEN_API = "https://api.kraken.com/0/public"
 
 # ---- Helpers ----------------------------------------------------------------
@@ -312,8 +323,162 @@ def replay_file(path: str, pace: float = 1.0, emit_ticks: bool = False, symbol: 
             }
             print(json.dumps(out, separators=(",", ":")))
 
-# ---- CLI --------------------------------------------------------------------
 
+def _build_df_for_replay(path: str, symbol: Optional[str]):
+    if pd is None:
+        raise RuntimeError("pandas is required for replay mode. pip install pandas")
+    df = load_jsonl_gz_to_df(path)
+    if df.empty:
+        return df
+    if symbol:
+        want = symbol.replace("/", "").upper()
+        df = df[df["pair"].str.replace("/", "", regex=False).str.upper() == want]
+    return df.sort_index()
+
+def _gen_tick_messages(df):
+    """Yield (src_ts_seconds_float, json_line) for raw trades."""
+    for _, t in df.iterrows():
+        src_ts = float(t["time"])
+        out = {
+            "type": "tick",
+            "pair": str(t["pair"]),
+            "price": float(t["price"]),
+            "volume": float(t["volume"]),
+            "time": float(t["time"]),
+            "side": str(t.get("side", "")),
+            "ordertype": str(t.get("ordertype", "")),
+            "misc": str(t.get("misc", "")),
+        }
+        yield src_ts, json.dumps(out, separators=(",", ":"))
+
+def _gen_secbar_messages(df):
+    """Yield (src_ts_seconds_float, json_line) for 1s OHLCV bars."""
+    bars = make_second_bars(df)
+    if bars.empty:
+        return
+    bars = bars.dropna(subset=["close"], how="all").sort_index()
+    pair_val = None
+    try:
+        pair_val = df["pair"].iloc[0]
+    except Exception:
+        pass
+    for ts, row in bars.iterrows():
+        src_ts = ts.timestamp()
+        out = {
+            "type": "secbar",
+            "ts": ts.isoformat(),
+            **({"pair": str(pair_val)} if pair_val else {}),
+            "open": None if pd.isna(row.get("open")) else float(row["open"]),
+            "high": None if pd.isna(row.get("high")) else float(row["high"]),
+            "low":  None if pd.isna(row.get("low"))  else float(row["low"]),
+            "close": None if pd.isna(row.get("close")) else float(row["close"]),
+            "volume": 0.0 if pd.isna(row.get("volume")) else float(row["volume"]),
+            "trades": int(row.get("trades", 0)) if not pd.isna(row.get("trades", 0)) else 0,
+            "vwap": None if pd.isna(row.get("vwap")) else float(row["vwap"]),
+        }
+        yield src_ts, json.dumps(out, separators=(",", ":"))
+
+async def _paced_send(iter_msgs, pace: float, send_func, loop_forever: bool):
+    """
+    iter_msgs: callable -> iterator of (src_ts, json_str)
+    send_func: async callable(text)
+    """
+    loop = asyncio.get_running_loop()
+    while True:
+        first_src = None
+        wall0 = loop.time()
+        for src_ts, payload in iter_msgs():
+            if first_src is None:
+                first_src = src_ts
+                wall0 = loop.time()
+            if pace > 0:
+                elapsed_src = src_ts - first_src
+                elapsed_wall = loop.time() - wall0
+                delay = (elapsed_src / pace) - elapsed_wall
+                if delay > 0:
+                    await asyncio.sleep(delay)
+            await send_func(payload)
+        if not loop_forever:
+            break
+
+# --- WebSocket modes ---
+async def ws_serve_per_client(args):
+    """Each client gets its own timeline from the beginning."""
+    if websockets is None:
+        raise RuntimeError("Install websockets: pip install websockets")
+
+    df = _build_df_for_replay(args.replay, args.symbol)
+    if df.empty:
+        print("[!] No data to replay.", file=sys.stderr)
+
+    def make_iter():
+        return _gen_tick_messages(df) if args.ticks else _gen_secbar_messages(df)
+
+    async def handler(ws, *_, **__):
+        async def send(payload: str):
+            await ws.send(payload)
+        try:
+            await _paced_send(make_iter, args.pace, send, args.loop)
+        except websockets.ConnectionClosed:
+            return
+
+    print(f"[i] WS per-client @ ws://{args.ws_host}:{args.ws_port} pace={args.pace} "
+          f"mode={'ticks' if args.ticks else 'secbar'} loop={args.loop}")
+    async with websockets.serve(handler, args.ws_host, args.ws_port, max_size=None):
+        await asyncio.Future()  # run forever
+
+async def ws_serve_shared(args):
+    """All clients share one timeline (late joiners pick up wherever the stream is)."""
+    if websockets is None:
+        raise RuntimeError("Install websockets: pip install websockets")
+
+    df = _build_df_for_replay(args.replay, args.symbol)
+    if df.empty:
+        print("[!] No data to replay.", file=sys.stderr)
+
+    clients = set()
+    clients_lock = asyncio.Lock()
+
+    async def handler(ws, *_, **__):
+        async with clients_lock:
+            clients.add(ws)
+        try:
+            await ws.wait_closed()
+        finally:
+            async with clients_lock:
+                clients.discard(ws)
+
+    async def broadcast(payload: str):
+        # snapshot to avoid mutation during iteration
+        async with clients_lock:
+            targets = list(clients)
+        if not targets:
+            return
+        # send concurrently; drop closed clients
+        send_tasks = []
+        for c in targets:
+            send_tasks.append(asyncio.create_task(c.send(payload)))
+        done, pending = await asyncio.wait(send_tasks, return_when=asyncio.ALL_COMPLETED)
+        # clean up failures
+        for t in done:
+            exc = t.exception()
+            if exc:
+                try:
+                    ws = targets[send_tasks.index(t)]
+                    await ws.close()
+                except Exception:
+                    pass
+
+    def make_iter():
+        return _gen_tick_messages(df) if args.ticks else _gen_secbar_messages(df)
+
+    print(f"[i] WS shared @ ws://{args.ws_host}:{args.ws_port} pace={args.pace} "
+          f"mode={'ticks' if args.ticks else 'secbar'} loop={args.loop}")
+    async with websockets.serve(handler, args.ws_host, args.ws_port, max_size=None):
+        await _paced_send(make_iter, args.pace, broadcast, args.loop)
+
+
+# ---- CLI --------------------------------------------------------------------
 
 def main():
     ap = argparse.ArgumentParser()
@@ -325,22 +490,41 @@ def main():
     ap.add_argument("--sec-bars", help="Optional: write per-second OHLCV Parquet")
     ap.add_argument("--rate-delay", type=float, default=1.1, help="Seconds to sleep between requests")
 
-    # --- new replay mode ---
+    # --- replay / print mode ---
     ap.add_argument("--replay", help="Path to trades JSONL.GZ to replay")
     ap.add_argument("--pace", type=float, default=1.0,
-                    help="Replay speed multiplier (1.0=real time, 10.0=10x faster, <=0 as fast as possible)")
-    ap.add_argument("--ticks", action="store_true",
-                    help="Emit raw trade ticks instead of per-second OHLCV")
+                    help="Replay speed (1.0=real-time, 10.0=10x faster, <=0 = as fast as possible)")
+    ap.add_argument("--ticks", action="store_true", help="Emit raw trades instead of per-second OHLCV")
     ap.add_argument("--symbol", help="Optional pair filter for replay (e.g., BTCUSD or XBTUSD)")
+    ap.add_argument("--loop", action="store_true", help="Loop the replay forever")
+
+    # --- websocket options ---
+    ap.add_argument("--ws", action="store_true", help="Serve the replay over WebSocket instead of printing")
+    ap.add_argument("--ws-host", default="127.0.0.1")
+    ap.add_argument("--ws-port", type=int, default=8765)
+    ap.add_argument("--ws-shared", action="store_true",
+                    help="Shared timeline broadcast (all clients see same clock). "
+                         "Without this, each client gets its own timeline.")
 
     args = ap.parse_args()
 
-    # --- replay mode ---
-    if args.replay:
+    # --- websocket replay ---
+    if args.replay and args.ws:
+        if websockets is None:
+            print("[!] websockets not installed; run: pip install websockets", file=sys.stderr)
+            sys.exit(2)
+        if args.ws_shared:
+            asyncio.run(ws_serve_shared(args))
+        else:
+            asyncio.run(ws_serve_per_client(args))
+        return
+
+    # --- stdout replay (no ws) ---
+    if args.replay and not args.ws:
         replay_file(args.replay, pace=args.pace, emit_ticks=args.ticks, symbol=args.symbol)
         return
 
-    # --- capture mode (validate required flags) ---
+    # --- capture mode ---
     missing = [flag for flag in ("pair", "date", "out") if getattr(args, flag) in (None, "")]
     if missing:
         ap.error("capture mode requires: --pair --date --out")
@@ -359,17 +543,16 @@ def main():
         if pd is None:
             print("[!] pandas not installed; skipping Parquet/second-bars.", file=sys.stderr)
             return
-
         df = load_jsonl_gz_to_df(args.out)
-
         if args.parquet:
             save_parquet(df, args.parquet)
             print(f"[i] Wrote raw trades Parquet -> {args.parquet}", file=sys.stderr)
-
         if args.sec_bars:
             bars = make_second_bars(df)
             save_parquet(bars, args.sec_bars)
             print(f"[i] Wrote per-second OHLCV -> {args.sec_bars}", file=sys.stderr)
+
+
 
 
 if __name__ == "__main__":
