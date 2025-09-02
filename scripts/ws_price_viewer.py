@@ -121,9 +121,9 @@ def _live_plot_loop(args, q: queue.Queue, stop_evt: threading.Event):
     ax.set_title(args.title)
     ax.set_xlabel(f"Time ({args.tz})")  # updated when first point arrives
     ax.set_ylabel("Price")
-    locator = AutoDateLocator()
+    locator = AutoDateLocator(tz=tz)
     ax.xaxis.set_major_locator(locator)
-    ax.xaxis.set_major_formatter(DateFormatter("%H:%M:%S"))
+    ax.xaxis.set_major_formatter(DateFormatter("%H:%M:%S", tz=tz))
 
     date_text = fig.text(0.99, 0.98, "", ha="right", va="top")  # <— NEW
 
@@ -221,9 +221,9 @@ def _headless_collect_and_save(args, q: queue.Queue, stop_evt: threading.Event):
     tz_abbr = times[0].tzname() or args.tz
     ax.set_xlabel(f"Time ({tz_abbr})")  # <— NEW
     ax.set_ylabel("Price")
-    locator = AutoDateLocator()
+    locator = AutoDateLocator(tz=tz)
     ax.xaxis.set_major_locator(locator)
-    ax.xaxis.set_major_formatter(DateFormatter("%H:%M:%S"))
+    ax.xaxis.set_major_formatter(DateFormatter("%H:%M:%S", tz=tz))
     ax.plot(times, prices, linewidth=1.0)
     ax.relim()
     ax.autoscale_view()

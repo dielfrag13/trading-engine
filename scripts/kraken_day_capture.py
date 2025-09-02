@@ -21,6 +21,7 @@ import sys
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Iterable, List, Optional, Tuple
+from zoneinfo import ZoneInfo  # ← NEW (stdlib in Python 3.9+)
 
 import requests
 
@@ -50,6 +51,28 @@ def iso_utc_day_bounds(day_str: str) -> Tuple[float, float]:
     start = dt
     end = dt + timedelta(days=1)
     return start.timestamp(), end.timestamp()
+
+def tz_day_bounds(day_str: str, tz_name: str) -> Tuple[float, float]:
+    """
+    Return (start_ts_utc, end_ts_utc) for the given *local* date in the given IANA timezone.
+    Example: tz_day_bounds("2025-08-28", "America/New_York")
+      → [2025-08-28 00:00:00 EDT, 2025-08-29 00:00:00 EDT) converted to UTC seconds.
+    """
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        print(f"[!] Unknown timezone '{tz_name}', defaulting to UTC. "
+              f"Tip: on Debian/Ubuntu, install 'tzdata'.", file=sys.stderr)
+        tz = timezone.utc
+
+    # Local midnight at start of the day in the chosen TZ
+    day = datetime.strptime(day_str, "%Y-%m-%d")
+    start_local = datetime(day.year, day.month, day.day, 0, 0, 0, tzinfo=tz)
+    end_local = start_local + timedelta(days=1)
+
+    start_utc = start_local.astimezone(timezone.utc)
+    end_utc = end_local.astimezone(timezone.utc)
+    return start_utc.timestamp(), end_utc.timestamp()
 
 def resolve_pair(session: requests.Session, pair_like: str) -> str:
     """
@@ -505,6 +528,8 @@ def main():
     ap.add_argument("--ws-shared", action="store_true",
                     help="Shared timeline broadcast (all clients see same clock). "
                          "Without this, each client gets its own timeline.")
+    ap.add_argument("--tz", default="America/New_York",
+                help="Interpret --date in this IANA timezone (default: America/New_York)")
 
     args = ap.parse_args()
 
@@ -529,7 +554,12 @@ def main():
     if missing:
         ap.error("capture mode requires: --pair --date --out")
 
-    start_ts, end_ts = iso_utc_day_bounds(args.date)
+    start_ts, end_ts = tz_day_bounds(args.date, args.tz)
+    # Optional: log what that means
+    siso = datetime.fromtimestamp(start_ts, tz=timezone.utc).isoformat()
+    eiso = datetime.fromtimestamp(end_ts, tz=timezone.utc).isoformat()
+    print(f"[i] Window: {args.date} in {args.tz}  →  {siso} to {eiso} UTC", file=sys.stderr)
+
 
     with requests.Session() as s:
         pair_alt = resolve_pair(s, args.pair)
