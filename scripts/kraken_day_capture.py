@@ -221,17 +221,129 @@ def replay_trades_by_second(df):
         if not frame.empty:
             yield ts.to_pydatetime(), frame
 
+
+def replay_file(path: str, pace: float = 1.0, emit_ticks: bool = False, symbol: Optional[str] = None):
+    """
+    Read a JSONL.GZ produced by this script and print JSON lines to stdout,
+    paced by original timestamps.
+
+    Default output: per-second OHLCV bars (one JSON per populated second).
+    With --ticks: raw trades (one JSON per trade).
+    """
+    if pd is None:
+        raise RuntimeError("pandas is required for replay mode. pip install pandas")
+
+    df = load_jsonl_gz_to_df(path)
+    if df.empty:
+        return
+
+    if symbol:
+        want = symbol.replace("/", "").upper()
+        df = df[df["pair"].str.replace("/", "", regex=False).str.upper() == want]
+        if df.empty:
+            return
+
+    import math, time as _time
+
+    if emit_ticks:
+        # Emit raw trades, paced by original trade times
+        first_ts = None
+        wall0 = _time.monotonic()
+        for _, t in df.sort_index().iterrows():
+            ts = float(t["time"])
+            if first_ts is None:
+                first_ts = ts
+                wall0 = _time.monotonic()
+            if pace > 0:
+                elapsed_src = ts - first_ts
+                elapsed_wall = _time.monotonic() - wall0
+                delay = (elapsed_src / pace) - elapsed_wall
+                if delay > 0:
+                    _time.sleep(delay)
+            out = {
+                "type": "tick",
+                "pair": str(t["pair"]),
+                "price": float(t["price"]),
+                "volume": float(t["volume"]),
+                "time": float(t["time"]),
+                "side": str(t.get("side", "")),
+                "ordertype": str(t.get("ordertype", "")),
+                "misc": str(t.get("misc", "")),
+            }
+            print(json.dumps(out, separators=(",", ":")))
+    else:
+        # Emit per-second OHLCV bars (skip empty seconds)
+        bars = make_second_bars(df)
+        if bars.empty:
+            return
+        bars = bars.dropna(subset=["close"], how="all").sort_index()
+
+        first_sec_ts = None
+        wall0 = _time.monotonic()
+        # Attempt to include a single pair if file is 1 symbol; else omit.
+        pair_val = None
+        try:
+            pair_val = df["pair"].iloc[0]
+        except Exception:
+            pair_val = None
+
+        for ts, row in bars.iterrows():
+            sec_ts = ts.timestamp()
+            if first_sec_ts is None:
+                first_sec_ts = sec_ts
+                wall0 = _time.monotonic()
+            if pace > 0:
+                elapsed_src = sec_ts - first_sec_ts
+                elapsed_wall = _time.monotonic() - wall0
+                delay = (elapsed_src / pace) - elapsed_wall
+                if delay > 0:
+                    _time.sleep(delay)
+            out = {
+                "type": "secbar",
+                "ts": ts.isoformat(),
+                **({"pair": str(pair_val)} if pair_val else {}),
+                "open": None if pd.isna(row.get("open")) else float(row["open"]),
+                "high": None if pd.isna(row.get("high")) else float(row["high"]),
+                "low":  None if pd.isna(row.get("low"))  else float(row["low"]),
+                "close": None if pd.isna(row.get("close")) else float(row["close"]),
+                "volume": 0.0 if pd.isna(row.get("volume")) else float(row["volume"]),
+                "trades": int(row.get("trades", 0)) if not pd.isna(row.get("trades", 0)) else 0,
+                "vwap": None if pd.isna(row.get("vwap")) else float(row["vwap"]),
+            }
+            print(json.dumps(out, separators=(",", ":")))
+
 # ---- CLI --------------------------------------------------------------------
+
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--pair", required=True, help="Kraken market, e.g. XBTUSD or BTC/USD")
-    ap.add_argument("--date", required=True, help="UTC date YYYY-MM-DD")
-    ap.add_argument("--out", required=True, help="Output raw trades JSONL.GZ")
+    # --- capture mode (existing) ---
+    ap.add_argument("--pair", help="Kraken market, e.g. XBTUSD or BTC/USD")
+    ap.add_argument("--date", help="UTC date YYYY-MM-DD")
+    ap.add_argument("--out", help="Output raw trades JSONL.GZ")
     ap.add_argument("--parquet", help="Optional: also write raw trades to Parquet")
     ap.add_argument("--sec-bars", help="Optional: write per-second OHLCV Parquet")
     ap.add_argument("--rate-delay", type=float, default=1.1, help="Seconds to sleep between requests")
+
+    # --- new replay mode ---
+    ap.add_argument("--replay", help="Path to trades JSONL.GZ to replay")
+    ap.add_argument("--pace", type=float, default=1.0,
+                    help="Replay speed multiplier (1.0=real time, 10.0=10x faster, <=0 as fast as possible)")
+    ap.add_argument("--ticks", action="store_true",
+                    help="Emit raw trade ticks instead of per-second OHLCV")
+    ap.add_argument("--symbol", help="Optional pair filter for replay (e.g., BTCUSD or XBTUSD)")
+
     args = ap.parse_args()
+
+    # --- replay mode ---
+    if args.replay:
+        replay_file(args.replay, pace=args.pace, emit_ticks=args.ticks, symbol=args.symbol)
+        return
+
+    # --- capture mode (validate required flags) ---
+    missing = [flag for flag in ("pair", "date", "out") if getattr(args, flag) in (None, "")]
+    if missing:
+        ap.error("capture mode requires: --pair --date --out")
 
     start_ts, end_ts = iso_utc_day_bounds(args.date)
 
@@ -239,13 +351,10 @@ def main():
         pair_alt = resolve_pair(s, args.pair)
         print(f"[i] Resolved pair: {args.pair} -> {pair_alt}", file=sys.stderr)
 
-        # Stream to JSONL.GZ while fetching
-        # We’ll iterate twice: once to write JSONL, then optionally load for parquet/bars.
         trade_stream = fetch_trades_for_day(s, pair_alt, start_ts, end_ts, rate_delay=args.rate_delay)
         count = write_jsonl_gz(trade_stream, args.out)
         print(f"[i] Wrote {count} trades to {args.out}", file=sys.stderr)
 
-    # Optional post-processing
     if args.parquet or args.sec_bars:
         if pd is None:
             print("[!] pandas not installed; skipping Parquet/second-bars.", file=sys.stderr)
@@ -261,6 +370,7 @@ def main():
             bars = make_second_bars(df)
             save_parquet(bars, args.sec_bars)
             print(f"[i] Wrote per-second OHLCV -> {args.sec_bars}", file=sys.stderr)
+
 
 if __name__ == "__main__":
     main()
