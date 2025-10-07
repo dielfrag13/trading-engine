@@ -3,8 +3,12 @@
 #include "EventBus.hpp"
 #include "IStrategy.hpp"
 #include "IBroker.hpp"
+#include "IMarketData.hpp"
 
 #include <memory>
+
+
+namespace eng {
 
 class Engine {
 public:
@@ -12,12 +16,18 @@ public:
 
     void set_strategy(std::unique_ptr<IStrategy> strat);
     void set_broker(std::unique_ptr<IBroker> brkr);
+    void set_market_data(std::unique_ptr<IMarketData> md);
+
 
     // Start the engine; returns when shutting down
     void run();
 
 private:
-    EventBus bus_;
+    eng::EventBus bus_;
     std::unique_ptr<IStrategy> strategy_;
     std::unique_ptr<IBroker>   broker_;
+    std::unique_ptr<IMarketData> market_data_;
+
 };
+
+}

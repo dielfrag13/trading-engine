@@ -2,6 +2,9 @@
 
 #pragma once
 #include <string>
+#include <any>
+
+namespace eng {
 
 struct PriceData {
     std::string symbol;
@@ -20,3 +23,5 @@ struct Order {
     enum class Side { Buy, Sell } side{Side::Buy};
 };
 
+
+} // namespace eng

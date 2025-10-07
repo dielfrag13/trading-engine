@@ -4,7 +4,10 @@
 
 #include "engine/Engine.hpp"
 #include "engine/Types.hpp"
+#include "engine/MarketDataTypes.hpp"
 #include <iostream>
+
+using namespace eng;
 
 Engine::Engine() = default;
 
@@ -16,13 +19,17 @@ void Engine::set_broker(std::unique_ptr<IBroker> brkr) {
     broker_ = std::move(brkr);
 }
 
+void Engine::set_market_data(std::unique_ptr<IMarketData> md) {
+    market_data_ = std::move(md);
+}
+
 void Engine::run() {
     // Minimal no-op run loop for now so we can compile & link.
     // Later: hook up market data subscriptions via bus_, call
     // strategy_->on_price_tick(...), place orders via broker_, etc.
 
-    if (!strategy_ || !broker_) {
-        std::cerr << "[Engine] Missing strategy or broker.\n";
+    if (!strategy_ || !broker_ || !market_data_) {
+        std::cerr << "[Engine] Missing strategy, broker, or market data stream.\n";
         return;
     }
 

@@ -3,6 +3,11 @@
 #include <string>
 #include <functional>
 
+/*
+the interface in which brokers -- the classes that perform orders, check account balances, etc -- inherit.
+*/
+
+namespace eng {
 class IBroker {
 public:
     virtual void place_order(const Order&) = 0;
@@ -13,3 +18,5 @@ public:
 
     virtual ~IBroker() = default;
 };
+
+} // namespace eng

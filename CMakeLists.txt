@@ -16,6 +16,7 @@ include_directories(${PROJECT_SOURCE_DIR}/include)
 add_subdirectory(src/engine)
 add_subdirectory(src/plugins)
 add_subdirectory(src/support)
+add_subdirectory(src/adapters)
 
 # Strategy & Broker plugins (optional: only if you want to build them here)
 # add_subdirectory(strategies/MovingAverage)
@@ -36,4 +37,5 @@ target_link_libraries(trading_engine
 		engine
 		support
 		pluginloader
+		adapters
 )
