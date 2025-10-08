@@ -9,6 +9,11 @@
 
 int main() {
 
+
+    #ifdef ENG_DEBUG
+        std::cout << "debug is on! let's go\n";
+    #endif
+
     // 1. set up a broker to facilitate orders   
     auto broker = std::make_unique<broker::NullBroker>();
 
