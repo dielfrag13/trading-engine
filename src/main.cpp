@@ -20,9 +20,13 @@ int main() {
     // 2. Set up one or more market-data adapters (per broker)
     auto feed1 = std::make_unique<adapter::BrokerMarketData>(*broker);
 
+    feed1->start(10);       // start the demo outputting a thing every second for 10 seconds
     // 3. provider (aggregator) that attaches feeds
     auto provider = std::make_unique<eng::ProviderMarketData>();
     provider->attach(std::move(feed1));
+    provider->subscribe_ticks({ "BTCUSD" }, [](const eng::Tick&){std::cout << "lol a tick\n";});
+    
+
     // provider->attach(std::move(feed2));
 
     // 4. set strategies

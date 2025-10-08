@@ -34,6 +34,11 @@ target_compile_options(eng_build_config INTERFACE
 # Include directories
 include_directories(${PROJECT_SOURCE_DIR}/include)
 
+# Prefer pthread and import the Threads target -- a requirement for linux, apparently.
+# chatgpt: Yup — that error means you’re using std::thread but not linking pthreads. On Linux, std::thread needs pthread_create from libpthread.
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+
 # Add subfolders
 add_subdirectory(src/engine)
 add_subdirectory(src/plugins)
@@ -61,6 +66,7 @@ target_link_libraries(trading_engine
 		support
 		pluginloader
 		adapters
+		Threads::Threads		# sets flags accordingly accross platforms. Don't hardcode -lpthread, that's a linux thing. 
 		eng_build_config
 )
 

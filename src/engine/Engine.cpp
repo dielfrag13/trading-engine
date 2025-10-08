@@ -7,6 +7,7 @@
 #include "engine/MarketDataTypes.hpp"
 #include "engine/ProviderMarketData.hpp"
 #include <iostream>
+#include <memory>
 
 using namespace eng;
 
@@ -22,6 +23,13 @@ void Engine::set_broker(std::unique_ptr<IBroker> brkr) {
 
 void Engine::set_market_data(std::unique_ptr<ProviderMarketData> md) {
     market_data_ = std::move(md);
+
+    // Tell provider what symbols to listen for, and wire its callback to publish on the bus
+    market_data_->subscribe_ticks({ "BTCUSD" }, [this](const Tick& t){
+        Event ev{ "ProviderTick", t };
+        bus_.publish(ev);
+    });
+
 }
 
 void Engine::run() {
@@ -52,6 +60,8 @@ void Engine::run() {
         }
     });
 
+    std::cout << "[Engine] sleeping for like 12 seconds.\n";
+    std::this_thread::sleep_for(std::chrono::seconds(12));
     std::cout << "[Engine] Run complete.\n";
 }
 

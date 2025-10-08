@@ -1,6 +1,9 @@
 // EventBus.cpp
 
 #include "engine/EventBus.hpp"
+//#ifdef ENG_DEBUG
+    #include <iostream>
+//#endif
 
 namespace eng {
 
@@ -22,9 +25,15 @@ bool EventBus::unsubscribe(const std::string& topic, HandlerId id) {
 }
 
 void EventBus::publish(const Event& ev) const {
+
+    #ifdef ENG_DEBUG
+        std::cout << "[debug] [bus publish] " << ev.type << " " << "\n";
+    #endif
+
     auto it = handlers_.find(ev.type);
     if (it == handlers_.end()) return;
     for (auto& pair : it->second) {
+        std::cout << "invoking a caller\n";
         pair.second(ev); // invoke handler
     }
 }

@@ -32,6 +32,7 @@ void attach(std::unique_ptr<eng::IMarketData> feed) {     // add a broker feed
 
 void subscribe_ticks(const std::vector<std::string>& syms,
                        std::function<void(const eng::Tick&)> on_tick) {
+    
     for (auto& f : feeds_) {
       f->subscribe_ticks(syms, on_tick); // same callback works for all feeds
     }

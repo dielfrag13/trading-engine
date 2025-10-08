@@ -7,6 +7,7 @@
 #include "ProviderMarketData.hpp"
 
 #include <memory>
+#include <thread>
 
 
 namespace eng {

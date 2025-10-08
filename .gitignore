@@ -52,6 +52,9 @@ build/*
 # VSCode?
 .vscode/*
 
+# pycache
+*/__pycache__/
+
 # .venv
 .venv/*
 
