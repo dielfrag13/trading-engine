@@ -4,6 +4,7 @@
 #include "IStrategy.hpp"
 #include "IBroker.hpp"
 #include "IMarketData.hpp"
+#include "ProviderMarketData.hpp"
 
 #include <memory>
 
@@ -16,7 +17,7 @@ public:
 
     void set_strategy(std::unique_ptr<IStrategy> strat);
     void set_broker(std::unique_ptr<IBroker> brkr);
-    void set_market_data(std::unique_ptr<IMarketData> md);
+    void set_market_data(std::unique_ptr<ProviderMarketData> md);
 
 
     // Start the engine; returns when shutting down
@@ -26,7 +27,7 @@ private:
     eng::EventBus bus_;
     std::unique_ptr<IStrategy> strategy_;
     std::unique_ptr<IBroker>   broker_;
-    std::unique_ptr<IMarketData> market_data_;
+    std::unique_ptr<ProviderMarketData> market_data_;
 
 };
 

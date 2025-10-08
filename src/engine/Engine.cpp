@@ -5,6 +5,7 @@
 #include "engine/Engine.hpp"
 #include "engine/Types.hpp"
 #include "engine/MarketDataTypes.hpp"
+#include "engine/ProviderMarketData.hpp"
 #include <iostream>
 
 using namespace eng;
@@ -19,7 +20,7 @@ void Engine::set_broker(std::unique_ptr<IBroker> brkr) {
     broker_ = std::move(brkr);
 }
 
-void Engine::set_market_data(std::unique_ptr<IMarketData> md) {
+void Engine::set_market_data(std::unique_ptr<ProviderMarketData> md) {
     market_data_ = std::move(md);
 }
 

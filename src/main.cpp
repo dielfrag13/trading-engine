@@ -2,7 +2,7 @@
 #include "strategies/NullStrategy.hpp"
 #include "brokers/NullBroker.hpp"
 #include "adapters/BrokerMarketData.hpp"
-#include "adapters/ProviderMarketData.hpp"
+#include "engine/ProviderMarketData.hpp"
 #include <memory>
 #include <vector>
 // When you implement concrete plugins, you'll include their factory headers.
@@ -16,7 +16,7 @@ int main() {
     auto feed1 = std::make_unique<adapter::BrokerMarketData>(*broker);
 
     // 3. provider (aggregator) that attaches feeds
-    auto provider = std::make_unique<adapter::ProviderMarketData>();
+    auto provider = std::make_unique<eng::ProviderMarketData>();
     provider->attach(std::move(feed1));
     // provider->attach(std::move(feed2));
 

@@ -21,9 +21,9 @@ It would do tasks like, say, taking "BTCUSD" from Kraken and outputting BTC (or 
 */
 
 // include/adapters/ProviderMarketData.hpp
-namespace adapter {
+namespace eng {
 
-class ProviderMarketData : public eng::IMarketData {
+class ProviderMarketData {
 public:
 void attach(std::unique_ptr<eng::IMarketData> feed) {     // add a broker feed
     feeds_.push_back(std::move(feed));
@@ -31,7 +31,7 @@ void attach(std::unique_ptr<eng::IMarketData> feed) {     // add a broker feed
 
 
 void subscribe_ticks(const std::vector<std::string>& syms,
-                       std::function<void(const eng::Tick&)> on_tick) override {
+                       std::function<void(const eng::Tick&)> on_tick) {
     for (auto& f : feeds_) {
       f->subscribe_ticks(syms, on_tick); // same callback works for all feeds
     }
@@ -41,5 +41,5 @@ private:
   std::vector<std::unique_ptr<eng::IMarketData>> feeds_;
   // symbol map, best-bid/ask chooser, failover policy, etc.
 };
-} // namespace adapter
+} // namespace eng 
 
