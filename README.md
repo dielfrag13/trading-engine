@@ -79,3 +79,107 @@ ctest --output-on-failure
 
 ```
 
+
+High-level ASCII representation
+
+```mermaid
+flowchart LR
+  %% ===========
+  %% External World
+  %% ===========
+  subgraph EXCHANGES["External World (Exchanges / Data Sources)"]
+    WS1["WebSocket Feeds<br/>(e.g., Kraken, Binance)"]
+    REST1["REST APIs<br/>(hist candles, metadata)"]
+    FILES["CSV / Parquet Files<br/>(backtest data)"]
+  end
+
+  %% ===========
+  %% Adapters (Market Data In)
+  %% ===========
+  subgraph ADAPTERS["Market Data Adapters"]
+    IMarketData[/"IMarketData<br/>(interface)"/]
+
+    BrokerMD["BrokerMarketData<br/>(demo / backtest)"]
+    FileReplay["FileReplayAdapter"]
+    WsKraken["WsKrakenAdapter"]
+  end
+
+  WS1 --> WsKraken
+  REST1 --> BrokerMD
+  FILES --> FileReplay
+
+  IMarketData --- BrokerMD
+  IMarketData --- FileReplay
+  IMarketData --- WsKraken
+
+  %% ===========
+  %% Engine Core
+  %% ===========
+  subgraph ENGINE["Engine Core"]
+    EventBus["EventBus<br/>(pub/sub)"]
+    ProviderMD["ProviderMarketData<br/>(aggregator / normalizer)"]
+    CoreEngine["Engine<br/>(orchestrator, lifecycle)"]
+  end
+
+  %% Provider consumes adapters
+  BrokerMD --> ProviderMD
+  FileReplay --> ProviderMD
+  WsKraken --> ProviderMD
+
+  %% Provider to EventBus (option A or B)
+  ProviderMD --> EventBus
+
+  %% ===========
+  %% Strategies
+  %% ===========
+  subgraph STRATS["Strategies"]
+    IStrategy[/"IStrategy<br/>(interface)"/]
+    NullStrat["NullStrategy<br/>(example)"]
+    OtherStrat["CustomStrategy plugins"]
+  end
+
+  IStrategy --- NullStrat
+  IStrategy --- OtherStrat
+
+  %% Strategies subscribe to bus topics (ticks, candles, fills)
+  EventBus --> STRATS
+
+  %% Strategies emit intents / orders to broker
+  STRATS --> CoreEngine
+
+  %% ===========
+  %% Brokers (Execution)
+  %% ===========
+  subgraph BROKERS["Brokers (Order Execution)"]
+    IBroker[/"IBroker<br/>(interface)"/]
+    NullBroker["NullBroker<br/>(stub)"]
+    RealBroker["RealBroker<br/>(exchange impls)"]
+  end
+
+  IBroker --- NullBroker
+  IBroker --- RealBroker
+
+  CoreEngine --> BROKERS
+
+  %% Broker sends execution events (fills, rejects, account updates) back to bus
+  BROKERS --> EventBus
+
+  %% ===========
+  %% Plugin System
+  %% ===========
+  subgraph PLUGINS["Plugin System"]
+    PluginLoader["PluginLoader<br/>(dlopen / dlsym)"]
+    SharedLibs[".so / .dll<br/>strategy & broker plugins"]
+  end
+
+  SharedLibs --> PluginLoader
+  PluginLoader --> STRATS
+  PluginLoader --> BROKERS
+
+  %% ===========
+  %% Notes
+  %% ===========
+  classDef iface fill:#ffffff,stroke:#333,stroke-dasharray: 3 3;
+  class IMarketData,IStrategy,IBroker iface;
+
+```
