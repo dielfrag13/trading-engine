@@ -46,7 +46,8 @@ private:
     eng::IBroker& broker_;
     std::mutex m_;
     std::vector<std::string> tick_syms_;
-    std::function<void(const eng::Tick&)> on_tick_;
+    // Support multiple subscribers: keep a list of callbacks and invoke them all.
+    std::vector<std::function<void(const eng::Tick&)>> on_tick_handlers_;
 
     std::atomic<bool> running_{false};
     std::thread th_;

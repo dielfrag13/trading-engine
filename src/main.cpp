@@ -1,5 +1,5 @@
 #include "engine/Engine.hpp"
-#include "strategies/NullStrategy.hpp"
+#include "strategies/MovingAverage.hpp"
 #include "brokers/NullBroker.hpp"
 #include "adapters/BrokerMarketData.hpp"
 #include "engine/ProviderMarketData.hpp"
@@ -29,6 +29,7 @@ int main() {
     provider->attach(std::move(feed1));
 
     // Print full tick info when ticks arrive
+    // this is a dummy printing callback that happens to subscribe to the same messages. 
     provider->subscribe_ticks({ "BTCUSD" }, [](const eng::Tick& t){
         auto tp = std::chrono::system_clock::to_time_t(t.ts);
         std::cout << "Tick: " << t.symbol << " @ " << t.last << " time=" << std::ctime(&tp);
@@ -36,17 +37,16 @@ int main() {
 
     // start the feed (defaults to 30 seconds)
     provider->start_all(30);
+
     // note: ProviderMarketData::attach moved the unique_ptr into the provider, which
     // will start the feed internally when engine runs or we could add an explicit start()
     // For now, the concrete adapter was attached; if you want explicit start control,
     // call start on the underlying feed after exposing it.
     // For this demo we'll rely on Engine wiring which calls run() and keeps process alive.
     
-
-    // provider->attach(std::move(feed2));
-
     // 4. set strategies
-    auto strat  = std::make_unique<strategy::NullStrategy>("BTCUSD", /*threshold*/ 100.0, /*qty*/ 0.01);
+    // Moving-average strategy: 5-sample SMA, threshold 1.0, qty 0.01
+    auto strat  = std::make_unique<strategy::MovingAverageStrategy>("BTCUSD", 5, 1.0, 0.01);
 
     // 5. engine: wire it all together
     eng::Engine engine;

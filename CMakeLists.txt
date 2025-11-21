@@ -45,6 +45,7 @@ add_subdirectory(src/plugins)
 add_subdirectory(src/support)
 add_subdirectory(src/adapters)
 add_subdirectory(src/brokers)
+add_subdirectory(src/strategies)
 
 # Strategy & Broker plugins (optional: only if you want to build them here)
 # add_subdirectory(strategies/MovingAverage)
@@ -67,6 +68,7 @@ target_link_libraries(trading_engine
 		support
 		pluginloader
 		adapters
+		strategies_lib
 		Threads::Threads		# sets flags accordingly accross platforms. Don't hardcode -lpthread, that's a linux thing. 
 		eng_build_config
 )

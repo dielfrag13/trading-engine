@@ -12,9 +12,15 @@ using TimePoint = std::chrono::time_point<std::chrono::system_clock>;
 void BrokerMarketData::subscribe_ticks(const std::vector<std::string>& symbols,
                         std::function<void(const eng::Tick&)> on_tick) {
     std::lock_guard<std::mutex> lk(m_);
-    tick_syms_ = symbols;
-    on_tick_   = std::move(on_tick);
-    std::cout << "[BrokerMarketData] adapter subscribed\n";
+    // Merge requested symbols into the internal symbol set (avoid duplicates)
+    for (const auto& s : symbols) {
+        if (std::find(tick_syms_.begin(), tick_syms_.end(), s) == tick_syms_.end()) {
+            tick_syms_.push_back(s);
+        }
+    }
+    // Store the handler so multiple subscribers receive ticks
+    on_tick_handlers_.push_back(std::move(on_tick));
+    std::cout << "[BrokerMarketData] adapter subscribed (total handlers=" << on_tick_handlers_.size() << ")\n";
 }
 
 void BrokerMarketData::stop() {
@@ -43,14 +49,14 @@ void BrokerMarketData::start(int seconds = 30) {
             if (std::chrono::steady_clock::now() - start_tp > std::chrono::seconds(seconds)) break;
 
             std::vector<std::string> syms;
-            std::function<void(const eng::Tick&)> cb;
+            std::vector<std::function<void(const eng::Tick&)>> handlers;
             {
                 std::lock_guard<std::mutex> lk(m_);
                 syms = tick_syms_;
-                cb   = on_tick_;
+                handlers = on_tick_handlers_;
             }
 
-            if (cb && !syms.empty()) {
+            if (!handlers.empty() && !syms.empty()) {
                 // compute new price (random delta in [-1,2], round to cents)
                 double delta = dist(gen);
                 double new_px = std::round((px + delta) * 100.0) / 100.0;
@@ -60,7 +66,9 @@ void BrokerMarketData::start(int seconds = 30) {
                 for (const auto& s : syms) {
                     eng::Tick t{ s, px, now_tp };
                     std::cout << "[BrokerMarketData thread] emitting tick " << s << " @ " << px << '\n';
-                    cb(t);
+                    for (auto &h : handlers) {
+                        if (h) h(t);
+                    }
                 }
             }
 
