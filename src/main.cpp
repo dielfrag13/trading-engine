@@ -14,17 +14,33 @@ int main() {
         std::cout << "debug is on! let's go\n";
     #endif
 
-    // 1. set up a broker to facilitate orders   
+    // 1. set up an exchange broker to facilitate orders
+    // The NullBroker is a dummy broker that will just do what you tell it.
     auto broker = std::make_unique<broker::NullBroker>();
 
     // 2. Set up one or more market-data adapters (per broker)
+    // These will provide market pricing data into the system on a tick-by-tick basis.
+    // Currently, BrokerMarketData just emits dummy ticks for demo purposes.
     auto feed1 = std::make_unique<adapter::BrokerMarketData>(*broker);
 
-    feed1->start(10);       // start the demo outputting a thing every second for 10 seconds
     // 3. provider (aggregator) that attaches feeds
     auto provider = std::make_unique<eng::ProviderMarketData>();
+    // Attach the feed before starting it so subscriptions are in place.
     provider->attach(std::move(feed1));
-    provider->subscribe_ticks({ "BTCUSD" }, [](const eng::Tick&){std::cout << "lol a tick\n";});
+
+    // Print full tick info when ticks arrive
+    provider->subscribe_ticks({ "BTCUSD" }, [](const eng::Tick& t){
+        auto tp = std::chrono::system_clock::to_time_t(t.ts);
+        std::cout << "Tick: " << t.symbol << " @ " << t.last << " time=" << std::ctime(&tp);
+    });
+
+    // start the feed (defaults to 30 seconds)
+    provider->start_all(30);
+    // note: ProviderMarketData::attach moved the unique_ptr into the provider, which
+    // will start the feed internally when engine runs or we could add an explicit start()
+    // For now, the concrete adapter was attached; if you want explicit start control,
+    // call start on the underlying feed after exposing it.
+    // For this demo we'll rely on Engine wiring which calls run() and keeps process alive.
     
 
     // provider->attach(std::move(feed2));

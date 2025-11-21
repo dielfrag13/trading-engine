@@ -80,7 +80,7 @@ ctest --output-on-failure
 ```
 
 
-High-level ASCII representation
+High-level representation
 
 ```mermaid
 flowchart LR

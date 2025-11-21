@@ -7,7 +7,7 @@ else
 	cmake .. -DCMAKE_BUILD_TYPE=Debug
 
 fi
-cmake --build .
+cmake --build . -- -j$(nproc)
 
 # quick reference example -- to add debug statements in code:
 #ifdef ENG_DEBUG

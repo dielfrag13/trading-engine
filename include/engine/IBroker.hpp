@@ -11,10 +11,25 @@ namespace eng {
 class IBroker {
 public:
     virtual void place_order(const Order&) = 0;
+
+    // New explicit API separating market and limit orders
+    // Market order: execute immediately at current market price
+    virtual void place_market_order(const Order& order) {
+        // default delegates to place_order for implementations that only support a single method
+        place_order(order);
+    }
+
+    // Limit order: specify a limit price at which to execute
+    virtual void place_limit_order(const Order& order, double /*limit_price*/) {
+        // default implementation delegates to place_order; brokers that support limits should override
+        place_order(order);
+    }
     virtual double get_balance() = 0;
     virtual PriceData get_current_price(const std::string& symbol) = 0;
+    /*
     virtual void subscribe_to_ticks(const std::string& symbol,
                                     std::function<void(const PriceData&)> cb) = 0;
+    */
 
     virtual ~IBroker() = default;
 };

@@ -44,6 +44,7 @@ add_subdirectory(src/engine)
 add_subdirectory(src/plugins)
 add_subdirectory(src/support)
 add_subdirectory(src/adapters)
+add_subdirectory(src/brokers)
 
 # Strategy & Broker plugins (optional: only if you want to build them here)
 # add_subdirectory(strategies/MovingAverage)

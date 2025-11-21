@@ -2,30 +2,34 @@
 #include "engine/IBroker.hpp"
 #include <functional>
 #include <iostream>
+#include <mutex>
 
 namespace broker {
 
 class NullBroker : public eng::IBroker {
 public:
-    void place_order(const eng::Order& order) override {
-        std::cout << "[NullBroker] place_order: " << order.symbol
-                  << " qty=" << order.qty
-                  << " side=" << (order.side == eng::Order::Side::Buy ? "BUY" : "SELL")
-                  << std::endl;
-        // No-op fill simulation
-    }
+    explicit NullBroker(double initial_balance = 1'000'000.0);
+    ~NullBroker() override;
 
-    double get_balance() override { return 1'000'000.0; }
+    // TODO: may be able to get rid of place_order as we will always use market/limit explicitly
+    void place_order(const eng::Order& order) override;
+    void place_market_order(const eng::Order& order) override;
+    void place_limit_order(const eng::Order& order, double limit_price) override;
 
-    eng::PriceData get_current_price(const std::string& symbol) override {
-        return eng::PriceData{symbol, 100.0};
-    }
+    double get_balance() override;
 
+    eng::PriceData get_current_price(const std::string& symbol) override;
+
+    /*
     void subscribe_to_ticks(const std::string& symbol,
-                            std::function<void(const eng::PriceData&)> cb) override {
-        // For demo, just immediately invoke one tick
-        cb(eng::PriceData{symbol, 90.0});  // triggers a BUY given threshold=100
-    }
+                            std::function<void(const eng::PriceData&)> cb) override;
+    */
+
+private:
+    double balance_;
+    std::mutex mutex_;
 };
+
+
 
 }

@@ -38,6 +38,22 @@ void subscribe_ticks(const std::vector<std::string>& syms,
     }
 
 }
+
+// Start all attached feeds for `seconds` seconds (feeds implement their own
+// behavior for lifecycle). This allows the provider to control when child
+// adapters emit ticks.
+void start_all(int seconds = 30) {
+  for (auto& f : feeds_) {
+    if (f) f->start(seconds);
+  }
+}
+
+// Stop all attached feeds and wait for them to terminate if they implement stop.
+void stop_all() {
+  for (auto& f : feeds_) {
+    if (f) f->stop();
+  }
+}
 private:
   std::vector<std::unique_ptr<eng::IMarketData>> feeds_;
   // symbol map, best-bid/ask chooser, failover policy, etc.

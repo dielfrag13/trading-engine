@@ -44,6 +44,7 @@ void Engine::run() {
 
     // Demo: subscribe to a single tick and let the strategy react
     const std::string symbol = "BTCUSD";
+    /*
     broker_->subscribe_to_ticks(symbol, [&](const PriceData& pd){
         strategy_->on_price_tick(pd);
         auto act = strategy_->get_trade_action();
@@ -59,9 +60,10 @@ void Engine::run() {
             std::cout << "[Engine] No action.\n";
         }
     });
+    */
 
     std::cout << "[Engine] sleeping for like 12 seconds.\n";
-    std::this_thread::sleep_for(std::chrono::seconds(12));
+    std::this_thread::sleep_for(std::chrono::seconds(30));
     std::cout << "[Engine] Run complete.\n";
 }
 

@@ -25,6 +25,11 @@ public:
         const std::vector<std::string>& symbols,
         std::function<void(const TradePrint&)> on_trade) = 0;
 
+    // Optional lifecycle control for live adapters. Default no-op so existing
+    // implementations do not need to change immediately.
+    virtual void start(int /*seconds*/) { }
+    virtual void stop() { }
+
     // Historical/backfill (e.g., for warm-up / indicators / backtest)
     
     virtual std::vector<Candle> get_hist_candles(
