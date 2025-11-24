@@ -3,6 +3,8 @@
 #include <unordered_map>
 #include <vector>
 #include <chrono>
+#include <iomanip>
+#include <sstream>
 
 namespace broker {
 
@@ -16,27 +18,47 @@ void NullBroker::place_order(const eng::Order& order) {
     place_market_order(order);
 }
 
-void NullBroker::place_market_order(const eng::Order& order) {
+double NullBroker::place_market_order(const eng::Order& order) {
     std::lock_guard<std::mutex> lk(mutex_);
-    // simple price model: query current price
     auto pd = get_current_price(order.symbol);
     double fill_price = pd.last;
-    double value = fill_price * order.qty;
+    double filled = 0.0;
+
     if (order.side == eng::Order::Side::Buy) {
+        // Buy logic: unchanged - add to position and deduct from balance
+        double value = fill_price * order.qty;
         balance_ -= value;
-        std::cout << "NullBroker: Bought " << order.qty << " of " << order.symbol
-                  << " @ " << fill_price << " -> balance=" << balance_ << '\n';
+        positions_[order.symbol] += order.qty;
+        filled = order.qty;
+        std::ostringstream ss;
+        ss << std::fixed << std::setprecision(2);
+        ss << "NullBroker: Bought " << order.qty << " of " << order.symbol
+           << " @ " << fill_price << " -> balance=" << balance_;
+        std::cout << ss.str() << '\n';
     } else {
+        // Sell logic: sell entire position at market price
+        double position = positions_[order.symbol];
+        if (position <= 0.0) {
+            std::cout << "NullBroker: No position to sell for " << order.symbol << "\n";
+            return 0.0;
+        }
+        double value = fill_price * position;
         balance_ += value;
-        std::cout << "NullBroker: Sold " << order.qty << " of " << order.symbol
-                  << " @ " << fill_price << " -> balance=" << balance_ << '\n';
+        positions_[order.symbol] = 0.0;
+        filled = position;
+        std::ostringstream ss;
+        ss << std::fixed << std::setprecision(2);
+        ss << "NullBroker: Sold " << position << " of " << order.symbol
+           << " @ " << fill_price << " -> balance=" << balance_;
+        std::cout << ss.str() << '\n';
     }
+
+    return filled;
 }
 
-void NullBroker::place_limit_order(const eng::Order& order, double limit_price) {
+double NullBroker::place_limit_order(const eng::Order& order, double limit_price) {
     std::lock_guard<std::mutex> lk(mutex_);
-    auto pd = get_current_price(order.symbol);
-    double market = pd.last;
+    double market = limit_price;
     bool execute = false;
     if (order.side == eng::Order::Side::Buy) {
         // buy limit: execute if market price <= limit_price
@@ -45,20 +67,47 @@ void NullBroker::place_limit_order(const eng::Order& order, double limit_price) 
         // sell limit: execute if market price >= limit_price
         execute = market >= limit_price;
     }
+    double filled = 0.0;
 
     if (execute) {
-        double value = market * order.qty;
         if (order.side == eng::Order::Side::Buy) {
+            // Buy logic: unchanged - add to position and deduct from balance
+            double value = market * order.qty;
             balance_ -= value;
+            positions_[order.symbol] += order.qty;
+            filled = order.qty;
+            std::ostringstream ss;
+            ss << std::fixed << std::setprecision(2);
+            ss << "NullBroker: Limit executed for " << order.symbol << " @ " << market
+               << " (limit=" << limit_price << ") -> balance=" << balance_;
+            std::cout << ss.str() << '\n';
         } else {
+            // Sell logic: sell entire position at limit price
+            double position = positions_[order.symbol];
+            if (position <= 0.0) {
+                std::cout << "NullBroker: No position to sell for " << order.symbol << "\n";
+                return 0.0;
+            }
+            double value = market * position;
             balance_ += value;
+            positions_[order.symbol] = 0.0;
+            filled = position;
+            std::ostringstream ss;
+            ss << std::fixed << std::setprecision(2);
+            ss << "NullBroker: Limit executed for " << order.symbol << " @ " << market
+               << " (limit=" << limit_price << "), sold " << position
+               << " -> balance=" << balance_;
+            std::cout << ss.str() << '\n';
         }
-        std::cout << "NullBroker: Limit executed for " << order.symbol << " @ " << market
-                  << " (limit=" << limit_price << ") -> balance=" << balance_ << '\n';
     } else {
-        std::cout << "NullBroker: Limit order for " << order.symbol << " @ " << limit_price
-                  << " not executed (market=" << market << ")\n";
+        std::ostringstream ss;
+        ss << std::fixed << std::setprecision(2);
+        ss << "NullBroker: Limit order for " << order.symbol << " @ " << limit_price
+           << " not executed (market=" << market << ")";
+        std::cout << ss.str() << '\n';
     }
+
+    return filled;
 }
 
 double NullBroker::get_balance() {

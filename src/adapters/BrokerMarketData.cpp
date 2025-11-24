@@ -9,6 +9,8 @@ namespace adapter {
 
 using TimePoint = std::chrono::time_point<std::chrono::system_clock>;
 
+// this would normally subscribe to external broker ticks and republish data
+// to its own subscribers
 void BrokerMarketData::subscribe_ticks(const std::vector<std::string>& symbols,
                         std::function<void(const eng::Tick&)> on_tick) {
     std::lock_guard<std::mutex> lk(m_);
@@ -30,8 +32,10 @@ void BrokerMarketData::stop() {
 
 // Emit ticks for `seconds` seconds on a background thread.
 // Prices start at 600.00 and change by a random decimal in [-1.0, +2.0]
-// each second, rounded to the nearest cent.
-void BrokerMarketData::start(int seconds = 30) {
+// for the initial period, then switch to an inverted distribution in the
+// final 15 seconds ([-2.0, +1.0]) to bias price direction the other way.
+// Each second emission is rounded to the nearest cent.
+void BrokerMarketData::start(int seconds = 45) {
     std::cout << "[BrokerMarketData] starting demo thread (" << seconds << "s)\n";
     if (running_.exchange(true)) return;
 
@@ -40,13 +44,16 @@ void BrokerMarketData::start(int seconds = 30) {
         // RNG for per-tick delta
         std::random_device rd;
         std::mt19937 gen(rd());
-        std::uniform_real_distribution<double> dist(-1.0, 2.0);
+        std::uniform_real_distribution<double> forward_dist(-1.0, 2.0);
+        std::uniform_real_distribution<double> inverted_dist(-2.0, 1.0);
 
         double px = 600.00; // starting price
         auto start_tp = std::chrono::steady_clock::now();
 
         while (running_.load()) {
-            if (std::chrono::steady_clock::now() - start_tp > std::chrono::seconds(seconds)) break;
+            auto now_sc = std::chrono::steady_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now_sc - start_tp).count();
+            if (elapsed > seconds) break;
 
             std::vector<std::string> syms;
             std::vector<std::function<void(const eng::Tick&)>> handlers;
@@ -57,12 +64,24 @@ void BrokerMarketData::start(int seconds = 30) {
             }
 
             if (!handlers.empty() && !syms.empty()) {
-                // compute new price (random delta in [-1,2], round to cents)
-                double delta = dist(gen);
+                // choose distribution: in the final 15 seconds use the inverted distribution
+                int remaining = seconds - static_cast<int>(elapsed);
+                double delta;
+                if (remaining <= 15) {
+                    // last 15s: invert bias to negative direction
+                    delta = inverted_dist(gen);
+                } else {
+                    // initial period: forward biased delta
+                    delta = forward_dist(gen);
+                }
+
+                // compute new price and round to cents
                 double new_px = std::round((px + delta) * 100.0) / 100.0;
                 px = new_px;
 
                 auto now_tp = std::chrono::system_clock::now();
+
+                // emit a tick for each symbol to all handlers
                 for (const auto& s : syms) {
                     eng::Tick t{ s, px, now_tp };
                     std::cout << "[BrokerMarketData thread] emitting tick " << s << " @ " << px << '\n';

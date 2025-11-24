@@ -13,8 +13,9 @@ public:
 
     // TODO: may be able to get rid of place_order as we will always use market/limit explicitly
     void place_order(const eng::Order& order) override;
-    void place_market_order(const eng::Order& order) override;
-    void place_limit_order(const eng::Order& order, double limit_price) override;
+    // return filled quantity
+    double place_market_order(const eng::Order& order) override;
+    double place_limit_order(const eng::Order& order, double limit_price) override;
 
     double get_balance() override;
 
@@ -27,6 +28,7 @@ public:
 
 private:
     double balance_;
+    std::unordered_map<std::string, double> positions_;  // track qty held per symbol
     std::mutex mutex_;
 };
 

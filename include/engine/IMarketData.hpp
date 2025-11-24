@@ -12,7 +12,8 @@ class IMarketData {
 public:
     virtual ~IMarketData() = default;
 
-    // Live streaming
+    // Live streaming -- subscribe to external data sources
+    // publish data to internal subscribers 
     virtual void subscribe_ticks(
         const std::vector<std::string>& symbols,
         std::function<void(const Tick&)> on_tick) = 0;

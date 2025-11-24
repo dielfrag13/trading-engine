@@ -35,8 +35,8 @@ int main() {
         std::cout << "Tick: " << t.symbol << " @ " << t.last << " time=" << std::ctime(&tp);
     });
 
-    // start the feed (defaults to 30 seconds)
-    provider->start_all(30);
+    // start the feed (now runs 45 seconds; final 15s are inverted-bias)
+    provider->start_all(45);
 
     // note: ProviderMarketData::attach moved the unique_ptr into the provider, which
     // will start the feed internally when engine runs or we could add an explicit start()

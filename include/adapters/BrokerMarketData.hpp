@@ -24,6 +24,8 @@ public:
     void stop();
     ~BrokerMarketData() override { stop(); }
 
+    // Subscribe to ticks EXTERNALLY for the given symbols
+    // also publish the data received to internal subscribers
     void subscribe_ticks(const std::vector<std::string>& symbols,
                          std::function<void(const eng::Tick&)> on_tick);
 

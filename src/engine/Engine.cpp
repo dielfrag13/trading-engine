@@ -51,14 +51,32 @@ void Engine::run() {
                 auto act = strategy_->get_trade_action();
                 if (act == TradeAction::Buy) {
                     Order o{t.symbol, 0.01, Order::Side::Buy};
-                    if (broker_) broker_->place_market_order(o);
-                    if (strategy_) strategy_->on_order_fill(o);
+                    if (broker_) {
+                        // place a limit buy at the most recent price and obtain filled qty
+                        double filled = broker_->place_limit_order(o, t.last);
+                        std::cout << "[Engine] Placed LIMIT BUY " << o.qty << " " << o.symbol
+                                  << " @ " << t.last << " (filled=" << filled << ")\n";
+                        if (filled > 0.0 && strategy_) {
+                            Order filled_o = o;
+                            filled_o.qty = filled;
+                            strategy_->on_order_fill(filled_o);
+                        }
+                    }
                 } else if (act == TradeAction::Sell) {
                     Order o{t.symbol, 0.01, Order::Side::Sell};
-                    if (broker_) broker_->place_market_order(o);
-                    if (strategy_) strategy_->on_order_fill(o);
+                    if (broker_) {
+                        // place a limit sell at the most recent price and obtain filled qty
+                        double filled = broker_->place_limit_order(o, t.last);
+                        std::cout << "[Engine] Placed LIMIT SELL " << o.qty << " " << o.symbol
+                                  << " @ " << t.last << " (filled=" << filled << ")\n";
+                        if (filled > 0.0 && strategy_) {
+                            Order filled_o = o;
+                            filled_o.qty = filled;
+                            strategy_->on_order_fill(filled_o);
+                        }
+                    }
                 } else {
-                    std::cout << "[Engine] Strategy: No action.\n";
+                    std::cout << "[Engine] Strategy: No action." << std::endl;
                 }
             }
         } catch (const std::bad_any_cast& e) {
@@ -66,8 +84,8 @@ void Engine::run() {
         }
     });
 
-    std::cout << "[Engine] sleeping for like 30 seconds.\n";
-    std::this_thread::sleep_for(std::chrono::seconds(30));
+    std::cout << "[Engine] sleeping for like 45 seconds.\n";
+    std::this_thread::sleep_for(std::chrono::seconds(45));
     std::cout << "[Engine] Run complete.\n";
 }
 

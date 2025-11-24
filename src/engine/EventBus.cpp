@@ -33,7 +33,6 @@ void EventBus::publish(const Event& ev) const {
     auto it = handlers_.find(ev.type);
     if (it == handlers_.end()) return;
     for (auto& pair : it->second) {
-        std::cout << "invoking a caller\n";
         pair.second(ev); // invoke handler
     }
 }

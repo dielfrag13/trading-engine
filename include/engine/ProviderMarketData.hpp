@@ -42,7 +42,7 @@ void subscribe_ticks(const std::vector<std::string>& syms,
 // Start all attached feeds for `seconds` seconds (feeds implement their own
 // behavior for lifecycle). This allows the provider to control when child
 // adapters emit ticks.
-void start_all(int seconds = 30) {
+void start_all(int seconds = 45) {
   for (auto& f : feeds_) {
     if (f) f->start(seconds);
   }

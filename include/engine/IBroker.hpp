@@ -14,15 +14,17 @@ public:
 
     // New explicit API separating market and limit orders
     // Market order: execute immediately at current market price
-    virtual void place_market_order(const Order& order) {
-        // default delegates to place_order for implementations that only support a single method
-        place_order(order);
+    // Returns the filled quantity (0.0 if nothing executed).
+    virtual double place_market_order(const Order& /*order*/) {
+        // default: no execution
+        return 0.0;
     }
 
     // Limit order: specify a limit price at which to execute
-    virtual void place_limit_order(const Order& order, double /*limit_price*/) {
-        // default implementation delegates to place_order; brokers that support limits should override
-        place_order(order);
+    // Returns the filled quantity (0.0 if not executed).
+    virtual double place_limit_order(const Order& /*order*/, double /*limit_price*/) {
+        // default: not executed
+        return 0.0;
     }
     virtual double get_balance() = 0;
     virtual PriceData get_current_price(const std::string& symbol) = 0;
