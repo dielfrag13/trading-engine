@@ -13,3 +13,7 @@ cmake --build . -- -j$(nproc)
 #ifdef ENG_DEBUG
     #std::cout << "debug is on! let's go\n";
 #endif
+
+# to run the frontend (after building it separately):
+# cd frontend
+# npm run dev

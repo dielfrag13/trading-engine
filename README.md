@@ -63,6 +63,38 @@ sudo apt-get install -y \
 sudo apt-get update && apt-get install -y build-essential cmake ninja-build libboost-all-dev libspdlog-dev nlohmann-json-dev libcurl4-openssl-dev libwebsocketpp-dev libssl-dev pkg-config
 ```
 
+# required packages for frontend
+
+## apt packages
+
+```
+sudo apt install -y \
+
+  libuv1-dev       \   # uWebSockets
+  zlib1g-dev       \   # uWebSockets
+  libboost-all-dev \   # Boost.Beast 
+```
+
+## Node and npm packages
+
+This will get a good version of node and npm, and will also install some important packages. 
+```
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash -
+
+sudo apt install nodejs -y # installs node >= 20.19.5 and npm >= 10.8.2
+npm install @chakra-ui/react @emotion/react @emotion/styled framer-motion     # Chakra UI
+npm install recharts                                                          # Recharts
+npm install zustand                                         # for live tick buffers, UI pannels, settings, etc
+npm install isomorphic-ws                                   # websockets builtin for reconnect logic + heartbeats
+
+npm install react-router-dom                                # for multi-page dashboards
+npm install --save-dev prettier                             # code formatting
+npm install --save-dev eslint @typescript-eslint/eslint-plugin @typescript-eslint/parser      # linting
+
+
+```
+
+
 # To build the project:
 ```
 # from your project root
@@ -190,4 +222,10 @@ flowchart LR
 See all details within the frontend repo's README. 
 
 
+
+notes:
+Created frontend scaffolding with:
+```
+npm create vite@latest frontend -- --template react-ts
+```
 
