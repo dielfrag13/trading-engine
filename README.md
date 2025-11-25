@@ -1,11 +1,11 @@
 # trading-engine
-stock bot try 2
+A C++-based multicomponent trading engine
 
 # Folder Structure
 - **trading-engine/**
   - `CMakeLists.txt`
   - **cmake/** _(optional custom CMake modules)_
-    - `FindBroker.cmake`
+    - `FindBroker.cmake`sdf
   - **configs/**
     - **strategies/** _(per‑strategy config, e.g. JSON/TOML)_
     - **brokers/** _(per‑broker config)_
@@ -21,7 +21,7 @@ stock bot try 2
       - `EventBus.cpp`
       - `Engine.cpp`
     - **plugins/** _(plugin‑loading glue)_
-      - `PluginLoader.cpp`
+      - `PluginLoader.cpp
     - **support/** _(REST/WebSocket, JSON, logging, etc.)_
       - `HttpClient.cpp`
       - `WebSocketClient.cpp`
@@ -183,3 +183,11 @@ flowchart LR
   class IMarketData,IStrategy,IBroker iface;
 
 ```
+
+
+# The frontend
+
+See all details within the frontend repo's README. 
+
+
+
