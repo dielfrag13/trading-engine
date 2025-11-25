@@ -1,35 +1,69 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+// src/App.tsx
+import {
+  Box,
+  Flex,
+  Grid,
+  GridItem,
+  Heading,
+  IconButton,
+  Spacer,
+} from '@chakra-ui/react';
+import { FiMoon, FiSun } from "react-icons/fi";
+import { PriceChart } from './components/PriceChart';
+import { EngineStatusPanel } from './components/EngineStatusPanel';
+import { PositionsPanel } from './components/PositionsPanel';
+import { OrdersPanel } from './components/OrdersPanel';
+import { useMockTickStream } from './hooks/useMockTickStream';
+import { useState } from 'react';
 
 function App() {
-  const [count, setCount] = useState(0)
+  // start the mock market data stream
+  useMockTickStream('BTCUSD');
+
+  const [isDark, setIsDark] = useState(true);
+
+  const toggleColorMode = () => {
+    setIsDark(!isDark);
+    document.documentElement.style.colorScheme = isDark ? 'light' : 'dark';
+  };
 
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
+    <Flex direction="column" minHeight="100vh" padding={4} gap={4}>
+      {/* Top Bar */}
+      <Flex align="center">
+        <Heading size="lg">Trading Engine Dashboard (Frontend)</Heading>
+        <Spacer />
+        <IconButton
+          aria-label="Toggle color mode"
+          onClick={toggleColorMode}
+          variant="ghost"
+        >
+          {isDark ? <FiSun /> : <FiMoon />}
+        </IconButton>
+      </Flex>
+
+      {/* Main Grid */}
+      <Grid
+        templateColumns={{ base: '1fr', lg: '2fr 1fr' }}
+        templateRows={{ base: 'auto auto auto', lg: '1fr' }}
+        gap={4}
+        flex="1"
+        alignItems="stretch"
+      >
+        <GridItem rowSpan={{ base: 1, lg: 1 }}>
+          <PriceChart />
+        </GridItem>
+
+        <GridItem display="flex" flexDirection="column" gap={4}>
+          <EngineStatusPanel />
+          <Box flex="1" display="flex" flexDirection="column" gap={4} minHeight="0">
+            <PositionsPanel />
+            <OrdersPanel />
+          </Box>
+        </GridItem>
+      </Grid>
+    </Flex>
+  );
 }
 
-export default App
+export default App;
