@@ -35,9 +35,19 @@ target_compile_options(eng_build_config INTERFACE
 include_directories(${PROJECT_SOURCE_DIR}/include)
 
 # Prefer pthread and import the Threads target -- a requirement for linux, apparently.
-# chatgpt: Yup — that error means you’re using std::thread but not linking pthreads. On Linux, std::thread needs pthread_create from libpthread.
+# chatgpt: Yup — that error means you're using std::thread but not linking pthreads. On Linux, std::thread needs pthread_create from libpthread.
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
+
+# WebSocket++ (header-only, but needs asio)
+find_package(websocketpp QUIET)
+if(NOT websocketpp_FOUND)
+  # If websocketpp is not installed, try to find asio instead
+  # websocketpp is header-only and just needs asio/boost.asio
+  message(STATUS "websocketpp not found via find_package, will rely on system headers if available")
+  # For Ubuntu: apt install libwebsocketpp-dev
+  # We'll include it from /usr/include/websocketpp if available
+endif()
 
 # Add subfolders
 add_subdirectory(src/engine)
@@ -46,6 +56,7 @@ add_subdirectory(src/support)
 add_subdirectory(src/adapters)
 add_subdirectory(src/brokers)
 add_subdirectory(src/strategies)
+add_subdirectory(src/server)
 
 # Strategy & Broker plugins (optional: only if you want to build them here)
 # add_subdirectory(strategies/MovingAverage)
@@ -69,6 +80,7 @@ target_link_libraries(trading_engine
 		pluginloader
 		adapters
 		strategies_lib
+		server
 		Threads::Threads		# sets flags accordingly accross platforms. Don't hardcode -lpthread, that's a linux thing. 
 		eng_build_config
 )

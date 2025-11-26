@@ -13,12 +13,14 @@ import { PriceChart } from './components/PriceChart';
 import { EngineStatusPanel } from './components/EngineStatusPanel';
 import { PositionsPanel } from './components/PositionsPanel';
 import { OrdersPanel } from './components/OrdersPanel';
-import { useMockTickStream } from './hooks/useMockTickStream';
+import { ConnectionStatus } from './components/ConnectionStatus';
+import { useEngineConnection } from './hooks/useEngineConnection';
 import { useState } from 'react';
 
 function App() {
-  // start the mock market data stream
-  useMockTickStream('BTCUSD');
+  // Use real live connection to C++ engine instead of mock
+  useEngineConnection();
+  // useMockTickStream('BTCUSD'); // Disabled in favor of live connection
 
   const [isDark, setIsDark] = useState(true);
 
@@ -33,10 +35,12 @@ function App() {
       <Flex align="center">
         <Heading size="lg">Trading Engine Dashboard (Frontend)</Heading>
         <Spacer />
+        <ConnectionStatus />
         <IconButton
           aria-label="Toggle color mode"
           onClick={toggleColorMode}
           variant="ghost"
+          ml={2}
         >
           {isDark ? <FiSun /> : <FiMoon />}
         </IconButton>

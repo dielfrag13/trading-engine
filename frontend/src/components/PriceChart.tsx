@@ -1,5 +1,5 @@
 // src/components/PriceChart.tsx
-import { Card, Heading } from '@chakra-ui/react';
+import { Card, Heading, Button, HStack } from '@chakra-ui/react';
 import {
   LineChart,
   Line,
@@ -10,9 +10,20 @@ import {
 } from 'recharts';
 import { useMemo } from 'react';
 import { useTickStore } from '../store/tickStore';
+import { engineWS } from '../api/engineWS';
 
 export function PriceChart() {
   const ticks = useTickStore((s) => s.ticks);
+  const clear = useTickStore((s) => s.clear);
+
+  console.log('[PriceChart] Rendering with', ticks.length, 'ticks');
+
+  const handleClearChart = async () => {
+    // Clear the local store
+    clear();
+    // Clear the backend file
+    await engineWS.clearTicks();
+  };
 
   const data = useMemo(
     () =>
@@ -25,15 +36,26 @@ export function PriceChart() {
   );
 
   return (
-    <Card.Root height="100%">
+    <Card.Root height="100%" minHeight="400px">
       <Card.Header pb={2}>
-        <Heading size="md">Price Chart (Mock BTCUSD)</Heading>
+        <HStack justify="space-between">
+          <Heading size="md">Price Chart (Mock BTCUSD)</Heading>
+          <Button 
+            size="sm" 
+            bg="red.500"
+            color="white"
+            _hover={{ bg: "red.600" }}
+            onClick={handleClearChart}
+          >
+            Clear Chart
+          </Button>
+        </HStack>
       </Card.Header>
-      <Card.Body>
+      <Card.Body display="flex" flexDirection="column" flex="1" minHeight="0">
         {data.length === 0 ? (
           <div>Waiting for ticks...</div>
         ) : (
-          <ResponsiveContainer width="100%" height={300}>
+          <ResponsiveContainer width="100%" height="100%">
             <LineChart data={data} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
               <XAxis 
                 dataKey="time" 

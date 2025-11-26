@@ -3,15 +3,36 @@
 #include "engine/Engine.hpp"
 #include "engine/ProviderMarketData.hpp"
 #include "strategies/MovingAverage.hpp"
+#include "server/FrontendBridge.hpp"
 #include <memory>
 #include <vector>
+#include <thread>
+#include <chrono>
+#include <iostream>
+#include <csignal>
+#include <atomic>
 // When you implement concrete plugins, you'll include their factory headers.
+
+static std::atomic<bool> shutdown_requested(false);
+static eng::Engine* g_engine = nullptr;
+
+void signal_handler(int sig) {
+  std::cout << "\n[Main] Shutdown signal received. Cleaning up...\n";
+  shutdown_requested = true;
+  if (g_engine) {
+    g_engine->request_shutdown();
+  }
+}
 
 int main() {
 
 #ifdef ENG_DEBUG
   std::cout << "debug is on! let's go\n";
 #endif
+
+  // Set up signal handlers for clean shutdown
+  std::signal(SIGINT, signal_handler);
+  std::signal(SIGTERM, signal_handler);
 
   // 1. set up an exchange broker to facilitate orders
   // The NullBroker is a dummy broker that will just do what you tell it.
@@ -52,12 +73,24 @@ int main() {
   auto strat =
       std::make_unique<strategy::MovingAverageStrategy>("BTCUSD", 5, 1.0, 0.01);
 
-  // 5. engine: wire it all together
-  eng::Engine engine;
-  engine.set_broker(std::move(broker));
-  engine.set_market_data(std::move(provider));
-  engine.set_strategy(std::move(strat));
-  engine.run();
+  // 5. Create the frontend bridge to serve ticks to the GUI
+  // This subscribes to ProviderTick events and broadcasts them to connected
+  // frontend clients via WebSocket on port 3000
+  auto engine = std::make_unique<eng::Engine>();
+  g_engine = engine.get();  // Store pointer for signal handler
+  auto bridge = std::make_unique<server::FrontendBridge>(engine->get_bus(), 3000);
+  bridge->start();
 
+  // 6. engine: wire it all together
+  engine->set_broker(std::make_unique<broker::NullBroker>());
+  engine->set_market_data(std::move(provider));
+  engine->set_strategy(std::move(strat));
+  engine->run();
+
+  // 7. Engine completed; stop the bridge and shut down cleanly
+  std::cout << "\n[Main] Engine run complete. Stopping WebSocket server...\n";
+  bridge->stop();
+  
+  std::cout << "[Main] Cleanup complete. Exiting.\n";
   return 0;
 }
