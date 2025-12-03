@@ -164,9 +164,9 @@ void FrontendBridge::run_ws_server() {
     server->set_reuse_addr(true);
 
     // Handle new connections
-    server->set_open_handler([this, &server](websocketpp::connection_hdl hdl) {
+    server->set_open_handler([this](websocketpp::connection_hdl hdl) {
       std::lock_guard<std::mutex> lock(ws_mutex_);
-      auto conn = server->get_con_from_hdl(hdl);
+      auto conn = ws_server_->get_con_from_hdl(hdl);
       ws_connections_.insert(conn);
       std::cout << "[FrontendBridge] Client connected. Total clients: " << ws_connections_.size() << "\n";
       
@@ -182,7 +182,7 @@ void FrontendBridge::run_ws_server() {
       run_start["data"]["timestamp"] = oss.str();
       
       try {
-        server->send(hdl, run_start.dump(), websocketpp::frame::opcode::text);
+        ws_server_->send(hdl, run_start.dump(), websocketpp::frame::opcode::text);
       } catch (const std::exception& e) {
         std::cerr << "[FrontendBridge] Failed to send RunStart on connection: " << e.what() << "\n";
       }
@@ -190,7 +190,7 @@ void FrontendBridge::run_ws_server() {
     });
 
     // Handle client disconnect
-    server->set_close_handler([this, &server](websocketpp::connection_hdl hdl) {
+    server->set_close_handler([this](websocketpp::connection_hdl hdl) {
       std::lock_guard<std::mutex> lock(ws_mutex_);
       auto it = ws_connections_.begin();
       while (it != ws_connections_.end()) {
