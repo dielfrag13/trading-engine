@@ -3,12 +3,18 @@
 #include <functional>
 #include <iostream>
 #include <mutex>
+#include <unordered_map>
+
+namespace eng {
+class EventBus;
+}
 
 namespace broker {
 
 class NullBroker : public eng::IBroker {
 public:
     explicit NullBroker(double initial_balance = 1'000'000.0);
+    explicit NullBroker(eng::EventBus& bus, double initial_balance = 1'000'000.0);
     ~NullBroker() override;
 
     // TODO: may be able to get rid of place_order as we will always use market/limit explicitly
@@ -27,9 +33,14 @@ public:
     */
 
 private:
+    eng::EventBus* bus_{nullptr};
     double balance_;
     std::unordered_map<std::string, double> positions_;  // track qty held per symbol
     std::mutex mutex_;
+    uint64_t next_order_id_{1};
+    
+    // Helper to generate unique order IDs
+    uint64_t generate_order_id();
 };
 
 

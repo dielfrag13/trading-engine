@@ -2,12 +2,16 @@
 #include "engine/Types.hpp"
 #include <string>
 #include <functional>
+#include <memory>
 
 /*
 the interface in which brokers -- the classes that perform orders, check account balances, etc -- inherit.
 */
 
 namespace eng {
+
+class EventBus;
+
 class IBroker {
 public:
     virtual void place_order(const Order&) = 0;

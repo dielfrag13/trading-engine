@@ -1,6 +1,5 @@
 // src/App.tsx
 import {
-  Box,
   Flex,
   Grid,
   GridItem,
@@ -13,6 +12,7 @@ import { PriceChart } from './components/PriceChart';
 import { EngineStatusPanel } from './components/EngineStatusPanel';
 import { PositionsPanel } from './components/PositionsPanel';
 import { OrdersPanel } from './components/OrdersPanel';
+import { AccountPanel } from './components/AccountPanel';
 import { ConnectionStatus } from './components/ConnectionStatus';
 import { useEngineConnection } from './hooks/useEngineConnection';
 import { useState } from 'react';
@@ -46,24 +46,33 @@ function App() {
         </IconButton>
       </Flex>
 
-      {/* Main Grid */}
+      {/* Main Grid: 2 column layout on large screens, 1 column on small */}
       <Grid
         templateColumns={{ base: '1fr', lg: '2fr 1fr' }}
-        templateRows={{ base: 'auto auto auto', lg: '1fr' }}
+        templateRows="auto auto auto"
         gap={4}
         flex="1"
         alignItems="stretch"
       >
-        <GridItem rowSpan={{ base: 1, lg: 1 }}>
+        {/* Left Column: Price Chart (spans all rows) */}
+        <GridItem rowSpan={{ base: 1, lg: 3 }}>
           <PriceChart />
         </GridItem>
 
+        {/* Right Column: Row 1 - Account Panel */}
         <GridItem display="flex" flexDirection="column" gap={4}>
+          <AccountPanel />
+        </GridItem>
+
+        {/* Right Column: Row 2 - Positions Panel */}
+        <GridItem display="flex" flexDirection="column" gap={4} minHeight="0">
+          <PositionsPanel />
+        </GridItem>
+
+        {/* Right Column: Row 3 - Orders and Engine Status stacked */}
+        <GridItem display="flex" flexDirection="column" gap={4} minHeight="0">
+          <OrdersPanel />
           <EngineStatusPanel />
-          <Box flex="1" display="flex" flexDirection="column" gap={4} minHeight="0">
-            <PositionsPanel />
-            <OrdersPanel />
-          </Box>
         </GridItem>
       </Grid>
     </Flex>

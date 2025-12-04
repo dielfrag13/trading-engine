@@ -1,225 +1,209 @@
 # trading-engine
-A C++-based multicomponent trading engine
+A C++-based multicomponent trading engine with real-time React frontend and event-driven architecture.
 
-# Folder Structure
-- **trading-engine/**
-  - `CMakeLists.txt`
-  - **cmake/** _(optional custom CMake modules)_
-    - `FindBroker.cmake`sdf
-  - **configs/**
-    - **strategies/** _(per‑strategy config, e.g. JSON/TOML)_
-    - **brokers/** _(per‑broker config)_
-  - **include/** _(public headers)_
-    - **engine/**
-      - `EventBus.hpp`
-      - `IStrategy.hpp`
-      - `IBroker.hpp`
-    - **plugins/**
-      - `PluginLoader.hpp`
-  - **src/**
-    - **engine/** _(main engine implementation)_
-      - `EventBus.cpp`
-      - `Engine.cpp`
-    - **plugins/** _(plugin‑loading glue)_
-      - `PluginLoader.cpp
-    - **support/** _(REST/WebSocket, JSON, logging, etc.)_
-      - `HttpClient.cpp`
-      - `WebSocketClient.cpp`
-  - **strategies/** _(compiled strategy plugins, .so/.dll)_
-    - **MovingAverage/** _(example plugin)_
-      - `CMakeLists.txt`
-      - `MovingAverage.cpp`
-      - `MovingAverage.hpp`
-  - **brokers/** _(compiled broker plugins)_
-    - **Binance/** _(example plugin)_
-      - `CMakeLists.txt`
-      - `BinanceBroker.cpp`
-      - `BinanceBroker.hpp`
-  - **tests/** _(unit & integration tests)_
-    - `EngineTests.cpp`
-    - `PluginLoaderTests.cpp`
+## Quick Links
 
-# required packages
+- **[SETUP.md](SETUP.md)** — Environment setup and dependency installation
+- **[BUILD.md](BUILD.md)** — Build instructions and compilation modes
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** — System design, component responsibilities, and event flow
+- **[frontend/README.md](frontend/README.md)** — Frontend tech stack and development
+- **[strategies/README.md](strategies/README.md)** — Writing trading strategy plugins
+- **[include/brokers/README.md](include/brokers/README.md)** — Broker interface and order execution
+
+## What This Is
+
+A production-grade trading system architecture combining:
+
+- **C++ Engine** — High-performance order execution, strategy orchestration, market data aggregation
+- **Event-Driven Core** — Pub/sub EventBus decouples all components (strategies, brokers, frontend)
+- **React Frontend** — Real-time dashboard with live price charts, order history, position tracking
+- **WebSocket Bridge** — Engine publishes events (ticks, fills, rejections) to frontend in real-time
+- **Plugin System** — Load trading strategies and broker integrations as `.so`/`.dll` libraries
+
+## Key Concepts
+
+### Order Lifecycle
+Every order flows through event-driven states:
 ```
-sudo apt-get update
-sudo apt-get install -y \
-    build-essential        \  # g++, make, etc.
-    cmake                  \  # CMake + ctest
-    ninja-build            \  # optional faster builds
-    libboost-all-dev       \  # Boost libraries (Asio, filesystem, etc.)
-    nlohmann-json3-dev     \  # JSON parsing
-    libspdlog-dev          \  # Logging
-    libcurl4-openssl-dev   \  # REST client (cURL)
-    libwebsocketpp-dev     \  # WebSocket++
-    libssl-dev             \  # TLS support
-    pkg-config             \  # helps CMake find libs
-    clang                  \  # if you wanna try Clang
-    clang-format           \  # for code linting
-    gdb                    \  # debugger
-    valgrind               \  # memory checking
+NEW → WORKING (broker accepted) → FILLED/REJECTED
 ```
 
-```
-sudo apt-get update && apt-get install -y build-essential cmake ninja-build libboost-all-dev libspdlog-dev nlohmann-json-dev libcurl4-openssl-dev libwebsocketpp-dev libssl-dev pkg-config
-```
+Each state transition publishes an event that reaches the frontend in real-time.
 
-# required packages for frontend
+### Event-Driven Architecture
+The **EventBus** is the central hub. All components publish and subscribe to topics:
+- `ProviderTick` — Market data
+- `OrderPlaced` — Order submitted
+- `OrderFilled` — Order executed
+- `OrderRejected` — Order failed validation
 
-## apt packages
+See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed event flows.
 
-```
-sudo apt install -y \
+### Decoupled Components
+- **Strategies** don't know about brokers or symbols
+- **Brokers** don't know about strategies or frontend
+- **Frontend** is pure consumer of events (can't fail the engine)
 
-  libuv1-dev       \   # uWebSockets
-  zlib1g-dev       \   # uWebSockets
-  libboost-all-dev \   # Boost.Beast 
-```
+This allows swapping implementations without recompilation.
 
-## Node and npm packages
+## Getting Started
 
-This will get a good version of node and npm, and will also install some important packages. 
-```
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash -
-
-sudo apt install nodejs -y # installs node >= 20.19.5 and npm >= 10.8.2
-npm install @chakra-ui/react @emotion/react @emotion/styled framer-motion     # Chakra UI
-npm install recharts                                                          # Recharts
-npm install zustand                                         # for live tick buffers, UI pannels, settings, etc
-npm install isomorphic-ws                                   # websockets builtin for reconnect logic + heartbeats
-
-npm install react-router-dom                                # for multi-page dashboards
-npm install --save-dev prettier                             # code formatting
-npm install --save-dev eslint @typescript-eslint/eslint-plugin @typescript-eslint/parser      # linting
-
-
+### 1. Setup Environment
+```bash
+# Install dependencies (C++, Node.js, libraries)
+# See SETUP.md for detailed instructions
 ```
 
-
-# To build the project:
+### 2. Build Backend
+```bash
+./build.sh              # Debug mode
+./build.sh release      # Production mode
 ```
-# from your project root
-mkdir -p build && cd build
 
-# configure
-cmake .. -DCMAKE_BUILD_TYPE=Release
+See [BUILD.md](BUILD.md) for detailed build options.
 
-# build everything (engine libs, pluginloader, support, and any in-tree plugins)
-cmake --build .
+### 3. Build Frontend
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
-# (optional) run tests
+### 4. Run
+```bash
+# Terminal 1: Start the C++ engine
+./build/trading_engine
+
+# Terminal 2: Start the React frontend
+cd frontend && npm run dev
+```
+
+Then open `http://localhost:5173` in your browser.
+
+## Folder Structure
+
+```
+trading-engine/
+├── include/              # C++ headers (interfaces and types)
+│   ├── engine/          # Core engine interfaces (IStrategy, IBroker, EventBus)
+│   ├── adapters/        # Market data adapter interface
+│   ├── brokers/         # Broker interface
+│   └── strategies/      # Strategy interface
+├── src/                 # C++ implementation
+│   ├── engine/          # EventBus, Engine orchestrator
+│   ├── brokers/         # NullBroker (demo), future real brokers
+│   ├── adapters/        # BrokerMarketData (demo)
+│   ├── strategies/      # MovingAverage (example strategy)
+│   ├── server/          # FrontendBridge (WebSocket relay)
+│   └── plugins/         # Plugin loader
+├── frontend/            # React + TypeScript frontend
+│   ├── src/
+│   │   ├── components/  # UI components (charts, panels)
+│   │   ├── hooks/       # React hooks (useEngineConnection, etc.)
+│   │   ├── store/       # Zustand state (orders, positions, ticks)
+│   │   ├── api/         # WebSocket client (engineWS)
+│   │   └── App.tsx      # Root component
+│   └── package.json
+├── tests/               # C++ unit/integration tests
+├── scripts/             # Python utilities (Kraken data capture, etc.)
+├── CMakeLists.txt       # C++ build configuration
+└── build.sh             # Build script
+```
+
+## Key Files to Understand
+
+### Backend
+- `include/engine/Types.hpp` — Order struct with lifecycle (NEW, WORKING, FILLED, REJECTED)
+- `include/engine/EventBus.hpp` — Pub/sub event hub
+- `include/engine/IBroker.hpp` — Broker interface
+- `src/brokers/NullBroker.cpp` — Example broker (publishes OrderPlaced, OrderFilled, OrderRejected)
+- `src/server/FrontendBridge.cpp` — WebSocket relay to frontend
+
+### Frontend
+- `frontend/src/api/engineWS.ts` — WebSocket client and message types
+- `frontend/src/store/orderStore.ts` — Zustand order + position state
+- `frontend/src/hooks/useEngineConnection.ts` — WebSocket event handler
+- `frontend/src/components/PriceChart.tsx` — Live price chart
+- `frontend/src/components/OrdersPanel.tsx` — Order history
+
+## Example Flow
+
+```
+1. Engine starts, loads strategy (MovingAverage)
+2. Market data adapter publishes ProviderTick events to EventBus
+3. Engine subscribes to ProviderTick, forwards to strategy
+4. Strategy analyzes price, returns TradeAction::Buy
+5. Engine calls broker.place_limit_order()
+6. Broker assigns order ID, publishes OrderPlaced event
+7. Broker checks execution, publishes OrderFilled event
+8. FrontendBridge relays OrderFilled as JSON to WebSocket
+9. Frontend useEngineConnection hook receives, updates Zustand store
+10. React components render updated orders/positions in real-time
+```
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed event diagrams.
+
+## Technology Stack
+
+### Backend (C++17)
+- **Boost.Asio** — Async I/O, networking
+- **nlohmann/json** — JSON serialization
+- **WebSocket++** — WebSocket server
+- **CMake** — Cross-platform build
+
+### Frontend (TypeScript)
+- **React 18** — UI framework
+- **Vite** — Lightning-fast dev server and bundler
+- **Chakra UI** — Modern component library
+- **Recharts** — Data visualization
+- **Zustand** — Lightweight state management
+- **WebSocket** — Real-time browser API
+
+## Testing
+
+### Unit Tests (C++)
+```bash
+cd build
 ctest --output-on-failure
-
 ```
 
-
-High-level representation
-
-```mermaid
-flowchart LR
-  %% ===========
-  %% External World
-  %% ===========
-  subgraph EXCHANGES["External World (Exchanges / Data Sources)"]
-    WS1["WebSocket Feeds<br/>(e.g., Kraken, Binance)"]
-    REST1["REST APIs<br/>(hist candles, metadata)"]
-    FILES["CSV / Parquet Files<br/>(backtest data)"]
-  end
-
-  %% ===========
-  %% Adapters (Market Data In)
-  %% ===========
-  subgraph ADAPTERS["Market Data Adapters"]
-    IMarketData[/"IMarketData<br/>(interface)"/]
-
-    BrokerMD["BrokerMarketData<br/>(demo / backtest)"]
-    FileReplay["FileReplayAdapter"]
-    WsKraken["WsKrakenAdapter"]
-  end
-
-  WS1 --> WsKraken
-  REST1 --> BrokerMD
-  FILES --> FileReplay
-
-  IMarketData --- BrokerMD
-  IMarketData --- FileReplay
-  IMarketData --- WsKraken
-
-  %% ===========
-  %% Engine Core
-  %% ===========
-  subgraph ENGINE["Engine Core"]
-    EventBus["EventBus<br/>(pub/sub)"]
-    ProviderMD["ProviderMarketData<br/>(aggregator / normalizer)"]
-    CoreEngine["Engine<br/>(orchestrator, lifecycle)"]
-  end
-
-  %% Provider consumes adapters
-  BrokerMD --> ProviderMD
-  FileReplay --> ProviderMD
-  WsKraken --> ProviderMD
-
-  %% Provider to EventBus (option A or B)
-  ProviderMD --> EventBus
-
-  %% ===========
-  %% Strategies
-  %% ===========
-  subgraph STRATS["Strategies"]
-    IStrategy[/"IStrategy<br/>(interface)"/]
-    NullStrat["NullStrategy<br/>(example)"]
-    OtherStrat["CustomStrategy plugins"]
-  end
-
-  IStrategy --- NullStrat
-  IStrategy --- OtherStrat
-
-  %% Strategies subscribe to bus topics (ticks, candles, fills)
-  EventBus --> STRATS
-
-  %% Strategies emit intents / orders to broker
-  STRATS --> CoreEngine
-
-  %% ===========
-  %% Brokers (Execution)
-  %% ===========
-  subgraph BROKERS["Brokers (Order Execution)"]
-    IBroker[/"IBroker<br/>(interface)"/]
-    NullBroker["NullBroker<br/>(stub)"]
-    RealBroker["RealBroker<br/>(exchange impls)"]
-  end
-
-  IBroker --- NullBroker
-  IBroker --- RealBroker
-
-  CoreEngine --> BROKERS
-
-  %% Broker sends execution events (fills, rejects, account updates) back to bus
-  BROKERS --> EventBus
-
-  %% ===========
-  %% Plugin System
-  %% ===========
-  subgraph PLUGINS["Plugin System"]
-    PluginLoader["PluginLoader<br/>(dlopen / dlsym)"]
-    SharedLibs[".so / .dll<br/>strategy & broker plugins"]
-  end
-
-  SharedLibs --> PluginLoader
-  PluginLoader --> STRATS
-  PluginLoader --> BROKERS
-
-  %% ===========
-  %% Notes
-  %% ===========
-  classDef iface fill:#ffffff,stroke:#333,stroke-dasharray: 3 3;
-  class IMarketData,IStrategy,IBroker iface;
-
+### Frontend
+```bash
+cd frontend
+npm test
+npm run lint
 ```
 
+## Development Tips
 
-# The frontend
+- **Debug logs**: Add `#ifdef ENG_DEBUG` macros for verbose output
+- **Hot reload**: Vite auto-refreshes on code changes
+- **Dark mode**: Toggle in frontend (UI preference stored in Zustand)
+- **WebSocket debugging**: Open browser DevTools → Network → WS
 
-See all details within the frontend repo's README. 
+## Future Enhancements
+
+- [ ] Real broker integrations (Kraken, Binance, etc.)
+- [ ] Multi-strategy portfolio management
+- [ ] Risk controls (position limits, stop-losses)
+- [ ] Backtesting framework with historical data replay
+- [ ] Dashboard persistence (save layouts, watchlists)
+- [ ] Live P&L and performance analytics
+
+## Architecture Resources
+
+For deeper understanding:
+
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** — Full component breakdown and event flows
+- **[SETUP.md](SETUP.md)** — Dependency installation
+- **[BUILD.md](BUILD.md)** — Compilation options
+- **[strategies/README.md](strategies/README.md)** — Writing plugins
+- **[frontend/README.md](frontend/README.md)** — Frontend development
+
+## License
+
+See LICENSE file.
+ 
 
 
 

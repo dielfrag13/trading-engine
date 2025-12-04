@@ -18,7 +18,55 @@ export interface RunStartMessage {
   };
 }
 
-export type EngineMessage = ProviderTickMessage | RunStartMessage;
+export interface OrderPlacedMessage {
+  type: 'OrderPlaced';
+  data: {
+    orderId: number;
+    symbol: string;
+    qty: number;
+    side: 'Buy' | 'Sell';
+    limitPrice: number;
+    status: 'WORKING';
+    timestamp: string;
+  };
+}
+
+export interface OrderFilledMessage {
+  type: 'OrderFilled';
+  data: {
+    orderId: number;
+    symbol: string;
+    filledQty: number;
+    fillPrice: number;
+    side: 'Buy' | 'Sell';
+    status: 'FILLED' | 'PARTIALLY_FILLED';
+    timestamp: string;
+  };
+}
+
+export interface OrderRejectedMessage {
+  type: 'OrderRejected';
+  data: {
+    orderId: number;
+    symbol: string;
+    qty: number;
+    side: 'Buy' | 'Sell';
+    reason: string;
+    timestamp: string;
+  };
+}
+
+export interface PositionUpdatedMessage {
+  type: 'PositionUpdated';
+  data: {
+    symbol: string;
+    qty: number;
+    avgPrice: number;
+    timestamp: string;
+  };
+}
+
+export type EngineMessage = ProviderTickMessage | RunStartMessage | OrderPlacedMessage | OrderFilledMessage | OrderRejectedMessage | PositionUpdatedMessage;
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
 

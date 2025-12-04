@@ -50,7 +50,10 @@ void Engine::run() {
                 strategy_->on_price_tick({t.symbol, t.last});
                 auto act = strategy_->get_trade_action();
                 if (act == TradeAction::Buy) {
-                    Order o{t.symbol, 0.01, Order::Side::Buy};
+                    Order o;
+                    o.symbol = t.symbol;
+                    o.qty = 0.01;
+                    o.side = Order::Side::Buy;
                     if (broker_) {
                         // place a limit buy at the most recent price and obtain filled qty
                         double filled = broker_->place_limit_order(o, t.last);
@@ -63,7 +66,10 @@ void Engine::run() {
                         }
                     }
                 } else if (act == TradeAction::Sell) {
-                    Order o{t.symbol, 0.01, Order::Side::Sell};
+                    Order o;
+                    o.symbol = t.symbol;
+                    o.qty = 0.01;
+                    o.side = Order::Side::Sell;
                     if (broker_) {
                         // place a limit sell at the most recent price and obtain filled qty
                         double filled = broker_->place_limit_order(o, t.last);

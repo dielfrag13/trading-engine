@@ -1,5 +1,6 @@
 #pragma once
 #include "engine/EventBus.hpp"
+#include "engine/Types.hpp"
 #include "engine/MarketDataTypes.hpp"
 #include <memory>
 #include <functional>
@@ -58,6 +59,9 @@ private:
 
   // Convert Tick to JSON and broadcast to all connected clients
   void on_provider_tick(const eng::Tick& tick);
+  void on_order_placed(const eng::Order& order);
+  void on_order_filled(const eng::Order& order);
+  void on_order_rejected(const eng::Order& order);
   void broadcast_to_clients(const json& msg);
   void emit_run_start();
   std::string generate_run_id() const;

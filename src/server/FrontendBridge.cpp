@@ -29,6 +29,36 @@ void FrontendBridge::start() {
     }
   });
 
+  // Subscribe to OrderPlaced events
+  bus_.subscribe("OrderPlaced", [this](const eng::Event& ev) {
+    try {
+      auto order = std::any_cast<eng::Order>(ev.data);
+      on_order_placed(order);
+    } catch (const std::bad_any_cast&) {
+      std::cerr << "[FrontendBridge] Failed to cast OrderPlaced event\n";
+    }
+  });
+
+  // Subscribe to OrderFilled events
+  bus_.subscribe("OrderFilled", [this](const eng::Event& ev) {
+    try {
+      auto order = std::any_cast<eng::Order>(ev.data);
+      on_order_filled(order);
+    } catch (const std::bad_any_cast&) {
+      std::cerr << "[FrontendBridge] Failed to cast OrderFilled event\n";
+    }
+  });
+
+  // Subscribe to OrderRejected events
+  bus_.subscribe("OrderRejected", [this](const eng::Event& ev) {
+    try {
+      auto order = std::any_cast<eng::Order>(ev.data);
+      on_order_rejected(order);
+    } catch (const std::bad_any_cast&) {
+      std::cerr << "[FrontendBridge] Failed to cast OrderRejected event\n";
+    }
+  });
+
   // Start WebSocket server in a separate thread
   ws_thread_ = std::make_unique<std::thread>([this]() {
     run_ws_server();
@@ -245,6 +275,61 @@ void FrontendBridge::run_ws_server() {
   } catch (const std::exception& e) {
     std::cerr << "[FrontendBridge] WebSocket server error: " << e.what() << "\n";
   }
+}
+
+void FrontendBridge::on_order_placed(const eng::Order& order) {
+  json msg;
+  msg["type"] = "OrderPlaced";
+  msg["data"]["orderId"] = order.id;
+  msg["data"]["symbol"] = order.symbol;
+  msg["data"]["qty"] = order.qty;
+  msg["data"]["side"] = (order.side == eng::Order::Side::Buy) ? "Buy" : "Sell";
+  msg["data"]["status"] = eng::order_status_to_string(order.status);
+  
+  auto now = std::chrono::system_clock::now();
+  auto tp = std::chrono::system_clock::to_time_t(now);
+  std::ostringstream oss;
+  oss << std::put_time(std::gmtime(&tp), "%Y-%m-%dT%H:%M:%SZ");
+  msg["data"]["timestamp"] = oss.str();
+
+  broadcast_to_clients(msg);
+}
+
+void FrontendBridge::on_order_filled(const eng::Order& order) {
+  json msg;
+  msg["type"] = "OrderFilled";
+  msg["data"]["orderId"] = order.id;
+  msg["data"]["symbol"] = order.symbol;
+  msg["data"]["filledQty"] = order.filled_qty;
+  msg["data"]["fillPrice"] = order.fill_price;
+  msg["data"]["side"] = (order.side == eng::Order::Side::Buy) ? "Buy" : "Sell";
+  msg["data"]["status"] = eng::order_status_to_string(order.status);
+  
+  auto now = std::chrono::system_clock::now();
+  auto tp = std::chrono::system_clock::to_time_t(now);
+  std::ostringstream oss;
+  oss << std::put_time(std::gmtime(&tp), "%Y-%m-%dT%H:%M:%SZ");
+  msg["data"]["timestamp"] = oss.str();
+
+  broadcast_to_clients(msg);
+}
+
+void FrontendBridge::on_order_rejected(const eng::Order& order) {
+  json msg;
+  msg["type"] = "OrderRejected";
+  msg["data"]["orderId"] = order.id;
+  msg["data"]["symbol"] = order.symbol;
+  msg["data"]["qty"] = order.qty;
+  msg["data"]["side"] = (order.side == eng::Order::Side::Buy) ? "Buy" : "Sell";
+  msg["data"]["reason"] = order.rejection_reason;
+  
+  auto now = std::chrono::system_clock::now();
+  auto tp = std::chrono::system_clock::to_time_t(now);
+  std::ostringstream oss;
+  oss << std::put_time(std::gmtime(&tp), "%Y-%m-%dT%H:%M:%SZ");
+  msg["data"]["timestamp"] = oss.str();
+
+  broadcast_to_clients(msg);
 }
 
 } // namespace server

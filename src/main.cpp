@@ -30,13 +30,14 @@ int main() {
   std::cout << "debug is on! let's go\n";
 #endif
 
-  // Set up signal handlers for clean shutdown
-  std::signal(SIGINT, signal_handler);
-  std::signal(SIGTERM, signal_handler);
+  // Create the engine first so we can pass its bus to the broker
+  auto engine = std::make_unique<eng::Engine>();
+  g_engine = engine.get();  // Store pointer for signal handler
 
   // 1. set up an exchange broker to facilitate orders
   // The NullBroker is a dummy broker that will just do what you tell it.
-  auto broker = std::make_unique<broker::NullBroker>();
+  // Pass the engine's event bus so orders can be published
+  auto broker = std::make_unique<broker::NullBroker>(engine->get_bus());
 
   // 2. Set up one or more market-data adapters (per broker)
   // These will provide market pricing data into the system on a tick-by-tick
@@ -76,13 +77,15 @@ int main() {
   // 5. Create the frontend bridge to serve ticks to the GUI
   // This subscribes to ProviderTick events and broadcasts them to connected
   // frontend clients via WebSocket on port 3000
-  auto engine = std::make_unique<eng::Engine>();
-  g_engine = engine.get();  // Store pointer for signal handler
   auto bridge = std::make_unique<server::FrontendBridge>(engine->get_bus(), 3000);
   bridge->start();
 
+  // Set up signal handlers for clean shutdown
+  std::signal(SIGINT, signal_handler);
+  std::signal(SIGTERM, signal_handler);
+
   // 6. engine: wire it all together
-  engine->set_broker(std::make_unique<broker::NullBroker>());
+  engine->set_broker(std::move(broker));
   engine->set_market_data(std::move(provider));
   engine->set_strategy(std::move(strat));
   engine->run();
