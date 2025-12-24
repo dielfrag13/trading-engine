@@ -142,31 +142,46 @@ export const useChartStore = create<ChartState>((set) => ({
 
   zoomToPreset: (preset: ZoomPreset) =>
     set((state) => {
-      const { viewportStartMs, viewportEndMs, dataMaxMs } = state;
+      const { viewportStartMs, viewportEndMs, dataMinMs, dataMaxMs } = state;
       
-      let newStart = viewportStartMs ?? 0;
-      let newEnd = viewportEndMs ?? 0;
+      // If no data yet, do nothing
+      if (dataMinMs === null || dataMaxMs === null) {
+        console.warn('[chartStore] zoomToPreset called but no data loaded yet');
+        return {};
+      }
+      
+      let newStart = viewportStartMs ?? dataMinMs;
+      let newEnd = viewportEndMs ?? dataMaxMs;
       
       if (preset === 'fit-all') {
-        const { dataMinMs } = state;
-        if (dataMinMs !== null && dataMaxMs !== null) {
-          const range = dataMaxMs - dataMinMs;
-          const buffer = range * 0.05;
-          newStart = dataMinMs - buffer;
-          newEnd = dataMaxMs + buffer;
-        }
+        const range = dataMaxMs - dataMinMs;
+        const buffer = range * 0.05;
+        newStart = dataMinMs - buffer;
+        newEnd = dataMaxMs + buffer;
       } else {
         const rangeMs = ZOOM_PRESET_RANGES[preset];
         // If auto-scroll, show latest data
         if (state.autoScroll && dataMaxMs !== null) {
-          newEnd = dataMaxMs + (dataMaxMs - (state.dataMinMs ?? dataMaxMs)) * 0.05;
+          newEnd = dataMaxMs + (dataMaxMs - dataMinMs) * 0.05;
           newStart = newEnd - rangeMs;
         } else if (viewportStartMs !== null && viewportEndMs !== null) {
           // Keep centered on current view
           const mid = (viewportStartMs + viewportEndMs) / 2;
           newStart = mid - rangeMs / 2;
           newEnd = mid + rangeMs / 2;
+        } else {
+          // No current viewport, use data bounds
+          const range = dataMaxMs - dataMinMs;
+          const mid = dataMinMs + range / 2;
+          newStart = mid - rangeMs / 2;
+          newEnd = mid + rangeMs / 2;
         }
+      }
+      
+      // Validate results before returning
+      if (isNaN(newStart) || isNaN(newEnd) || newStart >= newEnd) {
+        console.warn('[chartStore] Invalid viewport after zoomToPreset:', { newStart, newEnd, preset });
+        return {};
       }
       
       // Map preset to zoom level (rough approximation)

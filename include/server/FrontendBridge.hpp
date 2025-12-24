@@ -59,12 +59,16 @@ private:
 
   // Convert Tick to JSON and broadcast to all connected clients
   void on_provider_tick(const eng::Tick& tick);
+  void on_chart_candle(const eng::Candle& candle);
   void on_order_placed(const eng::Order& order);
   void on_order_filled(const eng::Order& order);
   void on_order_rejected(const eng::Order& order);
   void broadcast_to_clients(const json& msg);
   void emit_run_start();
   std::string generate_run_id() const;
+  
+  // Helper: convert TimePoint to ISO8601 string and millisecond epoch
+  std::pair<std::string, long long> timepoint_to_iso_and_ms(const eng::TimePoint& tp);
   
   // WebSocket server thread function
   void run_ws_server();

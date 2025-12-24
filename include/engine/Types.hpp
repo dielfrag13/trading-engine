@@ -3,9 +3,11 @@
 #pragma once
 #include <string>
 #include <any>
+#include <chrono>
 
 namespace eng {
 
+using TimePoint = std::chrono::time_point<std::chrono::system_clock>;
 
 // used by 
 struct PriceData {
@@ -50,6 +52,7 @@ struct Order {
     enum class Side { Buy, Sell } side{Side::Buy};
     OrderStatus status{OrderStatus::NEW};       // Current order status
     std::string rejection_reason{};             // Populated if REJECTED
+    TimePoint   timestamp{};                    // Order creation timestamp (event time, not wall-clock)
 };
 
 

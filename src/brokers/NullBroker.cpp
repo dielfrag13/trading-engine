@@ -64,7 +64,7 @@ double NullBroker::place_market_order(const eng::Order& order) {
     return filled;
 }
 
-double NullBroker::place_limit_order(const eng::Order& order, double limit_price) {
+double NullBroker::place_limit_order(const eng::Order& order, double limit_price, eng::TimePoint event_time) {
     std::lock_guard<std::mutex> lk(mutex_);
     
     // Assign order ID
@@ -72,9 +72,15 @@ double NullBroker::place_limit_order(const eng::Order& order, double limit_price
     exec_order.id = generate_order_id();
     exec_order.status = eng::OrderStatus::WORKING;
     
-    // Get current timestamp
-    auto now = std::chrono::system_clock::now();
-    auto tp = std::chrono::system_clock::to_time_t(now);
+    // Use event_time if provided, otherwise fall back to current time
+    if (event_time == eng::TimePoint()) {
+        exec_order.timestamp = std::chrono::system_clock::now();
+    } else {
+        exec_order.timestamp = event_time;
+    }
+    
+    // Convert timestamp to ISO8601 for logging
+    auto tp = std::chrono::system_clock::to_time_t(exec_order.timestamp);
     std::ostringstream ts_oss;
     ts_oss << std::put_time(std::gmtime(&tp), "%Y-%m-%dT%H:%M:%SZ");
     std::string timestamp = ts_oss.str();

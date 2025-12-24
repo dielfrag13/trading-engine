@@ -39,6 +39,24 @@ void subscribe_ticks(const std::vector<std::string>& syms,
 
 }
 
+void subscribe_trades(const std::vector<std::string>& syms,
+                      std::function<void(const eng::TradePrint&)> on_trade) {
+    
+    for (auto& f : feeds_) {
+      f->subscribe_trades(syms, on_trade); // same callback works for all feeds
+    }
+
+}
+
+void subscribe_quotes(const std::vector<std::string>& syms,
+                      std::function<void(const eng::Quote&)> on_quote) {
+    
+    for (auto& f : feeds_) {
+      f->subscribe_quotes(syms, on_quote); // same callback works for all feeds
+    }
+
+}
+
 // Start all attached feeds for `seconds` seconds (feeds implement their own
 // behavior for lifecycle). This allows the provider to control when child
 // adapters emit ticks.

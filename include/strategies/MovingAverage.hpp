@@ -54,6 +54,10 @@ public:
         action_ = eng::TradeAction::None;
     }
 
+    double get_net_position() const override {
+        return total_bought_qty_ - total_sold_qty_;
+    }
+
 private:
     std::string symbol_;
     size_t window_;

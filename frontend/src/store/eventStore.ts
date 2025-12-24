@@ -27,8 +27,8 @@ type EventState = {
   events: ChartEvent[];
   minTime: number | null; // earliest event timestamp in ms
   maxTime: number | null; // latest event timestamp in ms
-  addTick: (symbol: string, price: number, timestamp: string) => void;
-  addOrderFilled: (orderId: number, symbol: string, side: 'Buy' | 'Sell', fillPrice: number, filledQty: number, timestamp: string) => void;
+  addTick: (symbol: string, price: number, timestamp: string, msOverride?: number) => void;
+  addOrderFilled: (orderId: number, symbol: string, side: 'Buy' | 'Sell', fillPrice: number, filledQty: number, timestamp: string, msOverride?: number) => void;
   clear: () => void;
   getEventsByTimeRange: (startMs: number, endMs: number) => ChartEvent[];
   getAllEvents: () => ChartEvent[];
@@ -39,9 +39,14 @@ export const useEventStore = create<EventState>((set, get) => ({
   minTime: null,
   maxTime: null,
 
-  addTick: (symbol: string, price: number, timestamp: string) =>
+  addTick: (symbol: string, price: number, timestamp: string, msOverride?: number) =>
     set((state) => {
-      const ms = new Date(timestamp).getTime();
+      const ms = msOverride ?? new Date(timestamp).getTime();
+      if ((window as any).event_count === undefined) (window as any).event_count = 0;
+      if ((window as any).event_count < 3) {
+        console.log('[eventStore] addTick:', { symbol, timestamp, msOverride, ms, ms_as_date: new Date(ms).toISOString() });
+        (window as any).event_count++;
+      }
       const newEvent: TickEvent = {
         type: 'tick',
         timestamp,
@@ -68,9 +73,9 @@ export const useEventStore = create<EventState>((set, get) => ({
       };
     }),
 
-  addOrderFilled: (orderId: number, symbol: string, side: 'Buy' | 'Sell', fillPrice: number, filledQty: number, timestamp: string) =>
+  addOrderFilled: (orderId: number, symbol: string, side: 'Buy' | 'Sell', fillPrice: number, filledQty: number, timestamp: string, msOverride?: number) =>
     set((state) => {
-      const ms = new Date(timestamp).getTime();
+      const ms = msOverride ?? new Date(timestamp).getTime();
       const newEvent: OrderFilledEvent = {
         type: 'orderFilled',
         timestamp,

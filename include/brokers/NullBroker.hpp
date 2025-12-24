@@ -21,7 +21,7 @@ public:
     void place_order(const eng::Order& order) override;
     // return filled quantity
     double place_market_order(const eng::Order& order) override;
-    double place_limit_order(const eng::Order& order, double limit_price) override;
+    double place_limit_order(const eng::Order& order, double limit_price, eng::TimePoint event_time = eng::TimePoint()) override;
 
     double get_balance() override;
 

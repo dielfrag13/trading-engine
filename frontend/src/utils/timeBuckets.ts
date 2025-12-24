@@ -12,81 +12,97 @@ const BUCKET_STRATEGIES: Array<{
   label: string;
   intervalMs: number;
   format: (date: Date) => string;
+  skipDates?: boolean; // true = format without dates (only time)
 }> = [
   {
     label: '250ms',
     intervalMs: 250,
     format: (d) => d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 1 }),
+    skipDates: true,
   },
   {
     label: '500ms',
     intervalMs: 500,
     format: (d) => d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 1 }),
+    skipDates: true,
   },
   {
     label: '1 second',
     intervalMs: 1000,
     format: (d) => d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+    skipDates: true,
   },
   {
     label: '5 seconds',
     intervalMs: 5000,
     format: (d) => d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+    skipDates: true,
   },
   {
     label: '10 seconds',
     intervalMs: 10000,
     format: (d) => d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+    skipDates: true,
   },
   {
     label: '30 seconds',
     intervalMs: 30000,
     format: (d) => d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+    skipDates: true,
   },
   {
     label: '1 minute',
     intervalMs: 60000,
     format: (d) => d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' }),
+    skipDates: true,
   },
   {
     label: '5 minutes',
     intervalMs: 5 * 60000,
     format: (d) => d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' }),
+    skipDates: true,
   },
   {
     label: '15 minutes',
     intervalMs: 15 * 60000,
     format: (d) => d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' }),
+    skipDates: true,
   },
   {
     label: '30 minutes',
     intervalMs: 30 * 60000,
     format: (d) => d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' }),
+    skipDates: true,
   },
   {
     label: '1 hour',
     intervalMs: 60 * 60000,
     format: (d) => d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' }),
+    skipDates: true,
   },
   {
     label: '4 hours',
     intervalMs: 4 * 60 * 60000,
-    format: (d) => d.toLocaleDateString('en-US') + ' ' + d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' }),
+    format: (d) => d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' }),
+    skipDates: false,
   },
   {
     label: '1 day',
     intervalMs: 24 * 60 * 60000,
     format: (d) => d.toLocaleDateString('en-US'),
+    skipDates: false,
   },
   {
     label: '1 week',
     intervalMs: 7 * 24 * 60 * 60000,
     format: (d) => d.toLocaleDateString('en-US'),
+    skipDates: false,
   },
   {
     label: '1 month',
     intervalMs: 30 * 24 * 60 * 60000,
     format: (d) => d.toLocaleDateString('en-US', { year: 'numeric', month: 'short' }),
+    skipDates: false,
   },
 ];
 
@@ -122,6 +138,34 @@ export function calculateTimeBucket(viewportStartMs: number, viewportEndMs: numb
     format: bestStrategy.format,
     label: bestStrategy.label,
   };
+}
+
+/**
+ * Format a date range for display in a header/info box
+ * Shows: "YYYY-MM-DD (Dow)" if same day, or "YYYY-MM-DD — YYYY-MM-DD" if spanning multiple days
+ */
+export function formatDateRange(startMs: number, endMs: number): string {
+  // Validate inputs
+  if (isNaN(startMs) || isNaN(endMs) || !isFinite(startMs) || !isFinite(endMs)) {
+    return 'Invalid time range';
+  }
+  
+  const start = new Date(startMs);
+  const end = new Date(endMs);
+  
+  // Validate Date objects
+  if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+    return 'Invalid time range';
+  }
+  
+  const startDate = start.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' });
+  const endDate = end.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' });
+  const startDow = start.toLocaleDateString('en-US', { weekday: 'short' });
+  
+  if (startDate === endDate) {
+    return `${startDate} (${startDow})`;
+  }
+  return `${startDate} — ${endDate}`;
 }
 
 /**

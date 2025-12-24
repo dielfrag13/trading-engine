@@ -1,5 +1,5 @@
 // frontend/src/components/PriceChart.tsx
-import { Card, Heading, Button, Text } from '@chakra-ui/react';
+import { Card, Heading, Button, Text, Box } from '@chakra-ui/react';
 import {
   XAxis,
   YAxis,
@@ -14,7 +14,7 @@ import { useMemo, useRef, useEffect, useState } from 'react';
 import { useEventStore, type TickEvent } from '../store/eventStore';
 import { useChartStore } from '../store/chartStore';
 import { useChartZoom } from '../hooks/useChartZoom';
-import { calculateTimeBucket, generateTimeBuckets } from '../utils/timeBuckets';
+import { calculateTimeBucket, generateTimeBuckets, formatDateRange } from '../utils/timeBuckets';
 import { engineWS } from '../api/engineWS';
 
 export function PriceChart() {
@@ -57,13 +57,41 @@ export function PriceChart() {
 
   // Update data bounds when events change
   useEffect(() => {
+    if (minTime && maxTime) {
+      console.log('[PriceChart] Data bounds:', {
+        minTime,
+        maxTime,
+        minDate: new Date(minTime).toISOString(),
+        maxDate: new Date(maxTime).toISOString(),
+      });
+    }
     setDataBounds(minTime, maxTime);
   }, [minTime, maxTime, setDataBounds]);
+
+  // Debug: log viewport changes
+  useEffect(() => {
+    if (viewportStartMs && viewportEndMs) {
+      console.log('[PriceChart] Viewport:', {
+        viewportStartMs,
+        viewportEndMs,
+        startDate: new Date(viewportStartMs).toISOString(),
+        endDate: new Date(viewportEndMs).toISOString(),
+      });
+    }
+  }, [viewportStartMs, viewportEndMs]);
 
   // Handle clear chart
   const handleClearChart = async () => {
     clearEvents();
     await engineWS.clearTicks();
+  };
+
+  // Helper: snap a timestamp to the nearest candle boundary (1-second intervals)
+  // This allows trade markers to align with candles for rendering performance
+  // while preserving exact timestamps in the data for tooltips/details
+  const snapToCandle = (ms: number): number => {
+    const CANDLE_INTERVAL_MS = 1000;
+    return Math.round(ms / CANDLE_INTERVAL_MS) * CANDLE_INTERVAL_MS;
   };
 
   // Filter events by viewport and prepare chart data
@@ -76,7 +104,7 @@ export function PriceChart() {
     const visibleEvents = events.filter((e) => e.ms >= viewportStartMs && e.ms <= viewportEndMs);
     
     // Convert ticks to chart data
-    const chartDataPoints = visibleEvents
+    let chartDataPoints = visibleEvents
       .filter((e): e is TickEvent => e.type === 'tick')
       .map((tick) => ({
         ms: tick.ms,
@@ -85,8 +113,25 @@ export function PriceChart() {
         symbol: tick.symbol,
       }));
 
+    // If no ticks but there are order fills, create synthetic points at order fill locations
+    // This ensures the Y-axis scales correctly and markers are visible
+    if (chartDataPoints.length === 0) {
+      const orderFills = visibleEvents.filter((e) => e.type === 'orderFilled');
+      if (orderFills.length > 0) {
+        chartDataPoints = orderFills.map((e: any) => ({
+          ms: snapToCandle(e.ms),  // Use snapped ms for chart data alignment
+          time: new Date(e.ms).toLocaleTimeString('en-US', { hour12: false }),
+          price: e.fillPrice,
+          symbol: e.symbol,
+        }));
+      }
+    }
+
+    // Silenced debug logging
+    // console.log('[PriceChart] chartData: ticks=', chartDataPoints.filter(d => d).length);
+
     return chartDataPoints;
-  }, [events, viewportStartMs, viewportEndMs]);
+  }, [events, viewportStartMs, viewportEndMs, snapToCandle]);
 
   // Calculate time buckets for x-axis
   const timeBuckets = useMemo(() => {
@@ -112,15 +157,13 @@ export function PriceChart() {
     const filled = events.filter((e) => e.type === 'orderFilled' && (e as any).side === 'Buy' && e.ms >= viewportStartMs && e.ms <= viewportEndMs);
     const mapped = filled.map((e: any) => ({
       ms: e.ms,
-      x: e.ms,
+      x: snapToCandle(e.ms),
       y: e.fillPrice,
       orderId: e.orderId,
     }));
-    if (mapped.length > 0) {
-      console.log('[PriceChart] Buy orders in viewport:', mapped.map(o => `#${o.orderId} @ ${new Date(o.ms).toISOString()}`));
-    }
+    // Silenced: if (mapped.length > 0) { console.log('[PriceChart] Buy orders:', mapped.length); }
     return mapped;
-  }, [events, viewportStartMs, viewportEndMs]);
+  }, [events, viewportStartMs, viewportEndMs, snapToCandle]);
 
   const sellOrders = useMemo(() => {
     if (!viewportStartMs || !viewportEndMs) return [];
@@ -128,20 +171,17 @@ export function PriceChart() {
     const filled = events.filter((e) => e.type === 'orderFilled' && (e as any).side === 'Sell' && e.ms >= viewportStartMs && e.ms <= viewportEndMs);
     const mapped = filled.map((e: any) => ({
       ms: e.ms,
-      x: e.ms,
+      x: snapToCandle(e.ms),
       y: e.fillPrice,
       orderId: e.orderId,
     }));
-    if (mapped.length > 0) {
-      console.log('[PriceChart] Sell orders in viewport:', mapped.map(o => `#${o.orderId} @ ${new Date(o.ms).toISOString()}`));
-    }
+    // Silenced: if (mapped.length > 0) { console.log('[PriceChart] Sell orders:', mapped.length); }
     return mapped;
-  }, [events, viewportStartMs, viewportEndMs]);
+  }, [events, viewportStartMs, viewportEndMs, snapToCandle]);
 
-  // Debug: show all events on each render
+  // Debug: silenced verbose rendering logs
   useEffect(() => {
-    const orderFilledCount = events.filter(e => e.type === 'orderFilled').length;
-    console.log('[PriceChart] Rendering with', events.length, 'total events (', orderFilledCount, 'orderFilled ),', chartData.length, 'visible ticks, viewport: [' + (viewportStartMs ? new Date(viewportStartMs).toISOString() : 'null') + ', ' + (viewportEndMs ? new Date(viewportEndMs).toISOString() : 'null') + ']');
+    // Silenced: verbose console logging about render state
   }, [events, chartData.length, viewportStartMs, viewportEndMs]);
 
   return (
@@ -149,7 +189,24 @@ export function PriceChart() {
       <Card.Header pb={2}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Heading size="md">Price Chart (Mock BTCUSD)</Heading>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+              <Heading size="md">Price Chart (Mock BTCUSD)</Heading>
+              {viewportStartMs && viewportEndMs && (
+                <Box
+                  px={3}
+                  py={1}
+                  bg="gray.100"
+                  borderRadius="md"
+                  fontSize="sm"
+                  fontWeight="500"
+                  color="gray.700"
+                  border="1px solid"
+                  borderColor="gray.300"
+                >
+                  {formatDateRange(viewportStartMs, viewportEndMs)}
+                </Box>
+              )}
+            </div>
             <div style={{ display: 'flex', gap: '4px' }}>
               <Button size="sm" onClick={() => zoomOut()} variant="outline" bg="white" color="black" fontWeight="bold" border="2px solid #2d3748">
                 −
@@ -211,11 +268,16 @@ export function PriceChart() {
 
       <Card.Body position="relative" overflowY="auto" flex="1" display="flex" flexDirection="column">
         <div ref={chartContainerRef} style={{ width: '100%', height: '100%', flex: 1 }}>
-          <ResponsiveContainer width="100%" height={600}>
-            <ComposedChart
-              data={chartData}
-              margin={{ top: 20, right: 30, left: 0, bottom: 60 }}
-            >
+          {chartData.length === 0 ? (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '600px', color: '#999' }}>
+              <p>No data in this time range. Try zooming out or scrolling to a different period.</p>
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={600}>
+              <ComposedChart
+                data={chartData}
+                margin={{ top: 20, right: 30, left: 0, bottom: 60 }}
+              >
               <XAxis
                 dataKey="ms"
                 tickFormatter={(ms: number) => {
@@ -230,7 +292,7 @@ export function PriceChart() {
                 tick={{ fontSize: 12 }}
               />
               <YAxis
-                domain={['dataMin - 0.5', 'dataMax + 0.5']}
+                domain={chartData.length > 0 ? ['dataMin - 0.5', 'dataMax + 0.5'] : [0, 1]}
                 type="number"
                 tick={{ fontSize: 12 }}
                 width={55}
@@ -303,7 +365,7 @@ export function PriceChart() {
               {buyOrders.map((order) => (
                 <ReferenceDot
                   key={`buy-${order.orderId}-${order.ms}`}
-                  x={order.ms}
+                  x={order.x}
                   y={order.y}
                   r={4}
                   fill="#48bb78"
@@ -316,7 +378,7 @@ export function PriceChart() {
               {sellOrders.map((order) => (
                 <ReferenceDot
                   key={`sell-${order.orderId}-${order.ms}`}
-                  x={order.ms}
+                  x={order.x}
                   y={order.y}
                   r={4}
                   fill="#f56565"
@@ -325,7 +387,8 @@ export function PriceChart() {
                 />
               ))}
             </ComposedChart>
-          </ResponsiveContainer>
+            </ResponsiveContainer>
+          )}
         </div>
       </Card.Body>
     </Card.Root>

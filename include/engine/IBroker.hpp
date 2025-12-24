@@ -25,8 +25,9 @@ public:
     }
 
     // Limit order: specify a limit price at which to execute
+    // Timestamp is the event time (data time, not wall-clock)
     // Returns the filled quantity (0.0 if not executed).
-    virtual double place_limit_order(const Order& /*order*/, double /*limit_price*/) {
+    virtual double place_limit_order(const Order& /*order*/, double /*limit_price*/, TimePoint /*event_time*/ = TimePoint()) {
         // default: not executed
         return 0.0;
     }

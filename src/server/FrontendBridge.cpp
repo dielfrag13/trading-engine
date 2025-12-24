@@ -29,6 +29,16 @@ void FrontendBridge::start() {
     }
   });
 
+  // Subscribe to ChartCandle events (coalesced OHLCV data for visualization)
+  bus_.subscribe("ChartCandle", [this](const eng::Event& ev) {
+    try {
+      auto candle = std::any_cast<eng::Candle>(ev.data);
+      on_chart_candle(candle);
+    } catch (const std::bad_any_cast&) {
+      std::cerr << "[FrontendBridge] Failed to cast ChartCandle event\n";
+    }
+  });
+
   // Subscribe to OrderPlaced events
   bus_.subscribe("OrderPlaced", [this](const eng::Event& ev) {
     try {
@@ -111,15 +121,53 @@ std::vector<json> FrontendBridge::get_recent_ticks(size_t limit) const {
 }
 
 void FrontendBridge::on_provider_tick(const eng::Tick& tick) {
-  json msg;
-  msg["type"] = "ProviderTick";
-  msg["data"]["symbol"] = tick.symbol;
-  msg["data"]["price"] = tick.last;
+  // DISABLED: ProviderTick events are no longer sent to frontend.
+  // The frontend receives only ChartCandle events from the ChartAggregator.
+  // This prevents the frontend from being flooded with thousands of individual ticks
+  // and reduces network bandwidth by ~1000x in backtest mode.
+  //
+  // Raw tick data still flows through the engine and to strategies for accuracy.
+  // Only the aggregated candles are sent for visualization.
   
-  auto tp = std::chrono::system_clock::to_time_t(tick.ts);
+  // To re-enable if needed:
+  // json msg;
+  // msg["type"] = "ProviderTick";
+  // msg["data"]["symbol"] = tick.symbol;
+  // msg["data"]["price"] = tick.last;
+  // msg["data"]["ms"] = std::chrono::duration_cast<std::chrono::milliseconds>(
+  //     tick.ts.time_since_epoch()).count();
+  // broadcast_to_clients(msg);
+}
+
+void FrontendBridge::on_chart_candle(const eng::Candle& candle) {
+  json msg;
+  msg["type"] = "ChartCandle";
+  msg["data"]["symbol"] = candle.symbol;
+  msg["data"]["open"] = candle.open;
+  msg["data"]["high"] = candle.high;
+  msg["data"]["low"] = candle.low;
+  msg["data"]["close"] = candle.close;
+  msg["data"]["volume"] = candle.volume;
+  
+  // Include both ISO8601 timestamp and millisecond epoch for frontend
+  auto tp = std::chrono::system_clock::to_time_t(candle.open_time);
   std::ostringstream oss;
   oss << std::put_time(std::gmtime(&tp), "%Y-%m-%dT%H:%M:%SZ");
-  msg["data"]["timestamp"] = oss.str();
+  msg["data"]["open_time"] = oss.str();
+  
+  // Millisecond precision for viewport calculations and chart positioning
+  auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+      candle.open_time.time_since_epoch()).count();
+  msg["data"]["ms"] = ms;
+
+  // Debug: log first few candles to verify timestamps
+  static int candle_count = 0;
+  if (candle_count < 5000000) {
+    std::cout << "[FrontendBridge] ChartCandle #" << candle_count << ": symbol=" << candle.symbol
+              << " open_time=" << oss.str() << " ms=" << ms
+              << " (date: " << std::chrono::system_clock::to_time_t(candle.open_time) << ")\n";
+    candle_count++;
+  }
 
   broadcast_to_clients(msg);
 }
@@ -151,6 +199,20 @@ void FrontendBridge::broadcast_to_clients(const json& msg) {
 
   // Log to stdout for debugging
   std::cout << "[WS] " << msg.dump() << "\n";
+}
+
+// Helper: convert TimePoint to both ISO8601 string and millisecond epoch
+// Returns pair of (iso_string, milliseconds)
+std::pair<std::string, long long> FrontendBridge::timepoint_to_iso_and_ms(const eng::TimePoint& tp) {
+  // Convert to time_t for ISO8601 formatting
+  auto time_t_val = std::chrono::system_clock::to_time_t(tp);
+  std::ostringstream oss;
+  oss << std::put_time(std::gmtime(&time_t_val), "%Y-%m-%dT%H:%M:%SZ");
+  
+  // Convert to millisecond epoch
+  auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(tp.time_since_epoch()).count();
+  
+  return {oss.str(), ms};
 }
 
 std::string FrontendBridge::generate_run_id() const {
@@ -286,11 +348,10 @@ void FrontendBridge::on_order_placed(const eng::Order& order) {
   msg["data"]["side"] = (order.side == eng::Order::Side::Buy) ? "Buy" : "Sell";
   msg["data"]["status"] = eng::order_status_to_string(order.status);
   
-  auto now = std::chrono::system_clock::now();
-  auto tp = std::chrono::system_clock::to_time_t(now);
-  std::ostringstream oss;
-  oss << std::put_time(std::gmtime(&tp), "%Y-%m-%dT%H:%M:%SZ");
-  msg["data"]["timestamp"] = oss.str();
+  // Use order's event_time instead of wall-clock time for backtesting consistency
+  auto [timestamp_iso, ms] = timepoint_to_iso_and_ms(order.timestamp);
+  msg["data"]["timestamp"] = timestamp_iso;
+  msg["data"]["ms"] = ms;
 
   broadcast_to_clients(msg);
 }
@@ -305,11 +366,10 @@ void FrontendBridge::on_order_filled(const eng::Order& order) {
   msg["data"]["side"] = (order.side == eng::Order::Side::Buy) ? "Buy" : "Sell";
   msg["data"]["status"] = eng::order_status_to_string(order.status);
   
-  auto now = std::chrono::system_clock::now();
-  auto tp = std::chrono::system_clock::to_time_t(now);
-  std::ostringstream oss;
-  oss << std::put_time(std::gmtime(&tp), "%Y-%m-%dT%H:%M:%SZ");
-  msg["data"]["timestamp"] = oss.str();
+  // Use order's event_time instead of wall-clock time for backtesting consistency
+  auto [timestamp_iso, ms] = timepoint_to_iso_and_ms(order.timestamp);
+  msg["data"]["timestamp"] = timestamp_iso;
+  msg["data"]["ms"] = ms;
 
   broadcast_to_clients(msg);
 }
@@ -323,11 +383,10 @@ void FrontendBridge::on_order_rejected(const eng::Order& order) {
   msg["data"]["side"] = (order.side == eng::Order::Side::Buy) ? "Buy" : "Sell";
   msg["data"]["reason"] = order.rejection_reason;
   
-  auto now = std::chrono::system_clock::now();
-  auto tp = std::chrono::system_clock::to_time_t(now);
-  std::ostringstream oss;
-  oss << std::put_time(std::gmtime(&tp), "%Y-%m-%dT%H:%M:%SZ");
-  msg["data"]["timestamp"] = oss.str();
+  // Use order's event_time instead of wall-clock time for backtesting consistency
+  auto [timestamp_iso, ms] = timepoint_to_iso_and_ms(order.timestamp);
+  msg["data"]["timestamp"] = timestamp_iso;
+  msg["data"]["ms"] = ms;
 
   broadcast_to_clients(msg);
 }

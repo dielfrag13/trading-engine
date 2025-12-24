@@ -56,7 +56,7 @@ void Engine::run() {
                     o.side = Order::Side::Buy;
                     if (broker_) {
                         // place a limit buy at the most recent price and obtain filled qty
-                        double filled = broker_->place_limit_order(o, t.last);
+                        double filled = broker_->place_limit_order(o, t.last, t.ts);
                         std::cout << "[Engine] Placed LIMIT BUY " << o.qty << " " << o.symbol
                                   << " @ " << t.last << " (filled=" << filled << ")\n";
                         if (filled > 0.0 && strategy_) {
@@ -66,20 +66,27 @@ void Engine::run() {
                         }
                     }
                 } else if (act == TradeAction::Sell) {
-                    Order o;
-                    o.symbol = t.symbol;
-                    o.qty = 0.01;
-                    o.side = Order::Side::Sell;
-                    if (broker_) {
-                        // place a limit sell at the most recent price and obtain filled qty
-                        double filled = broker_->place_limit_order(o, t.last);
-                        std::cout << "[Engine] Placed LIMIT SELL " << o.qty << " " << o.symbol
-                                  << " @ " << t.last << " (filled=" << filled << ")\n";
-                        if (filled > 0.0 && strategy_) {
-                            Order filled_o = o;
-                            filled_o.qty = filled;
-                            strategy_->on_order_fill(filled_o);
+                    // Check if we have a position to sell before attempting
+                    // This prevents rejected orders and works with long/short/futures/options
+                    double netPos = strategy_->get_net_position();
+                    if (netPos > 0.001) {  // Small tolerance for floating point errors
+                        Order o;
+                        o.symbol = t.symbol;
+                        o.qty = 0.01;
+                        o.side = Order::Side::Sell;
+                        if (broker_) {
+                            // place a limit sell at the most recent price and obtain filled qty
+                            double filled = broker_->place_limit_order(o, t.last, t.ts);
+                            std::cout << "[Engine] Placed LIMIT SELL " << o.qty << " " << o.symbol
+                                      << " @ " << t.last << " (filled=" << filled << ")\n";
+                            if (filled > 0.0 && strategy_) {
+                                Order filled_o = o;
+                                filled_o.qty = filled;
+                                strategy_->on_order_fill(filled_o);
+                            }
                         }
+                    } else {
+                        std::cout << "[Engine] Skipping SELL: no position to sell (net pos=" << netPos << ")\n";
                     }
                 } else {
                     std::cout << "[Engine] Strategy: No action." << std::endl;

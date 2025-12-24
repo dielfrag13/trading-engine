@@ -28,6 +28,7 @@ export interface OrderPlacedMessage {
     limitPrice: number;
     status: 'WORKING';
     timestamp: string;
+    ms?: number;  // Millisecond epoch for chart positioning
   };
 }
 
@@ -41,6 +42,7 @@ export interface OrderFilledMessage {
     side: 'Buy' | 'Sell';
     status: 'FILLED' | 'PARTIALLY_FILLED';
     timestamp: string;
+    ms?: number;  // Millisecond epoch for chart positioning
   };
 }
 
@@ -53,6 +55,7 @@ export interface OrderRejectedMessage {
     side: 'Buy' | 'Sell';
     reason: string;
     timestamp: string;
+    ms?: number;  // Millisecond epoch for chart positioning
   };
 }
 
@@ -66,7 +69,21 @@ export interface PositionUpdatedMessage {
   };
 }
 
-export type EngineMessage = ProviderTickMessage | RunStartMessage | OrderPlacedMessage | OrderFilledMessage | OrderRejectedMessage | PositionUpdatedMessage;
+export interface ChartCandleMessage {
+  type: 'ChartCandle';
+  data: {
+    symbol: string;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume: number;
+    open_time: string;
+    ms: number; // Millisecond epoch for precise viewport positioning
+  };
+}
+
+export type EngineMessage = ProviderTickMessage | RunStartMessage | OrderPlacedMessage | OrderFilledMessage | OrderRejectedMessage | PositionUpdatedMessage | ChartCandleMessage;
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
 
@@ -81,6 +98,17 @@ class EngineTickClient {
   private readonly wsUrl = 'ws://localhost:3000';
   private reconnectAttempts = 0;
   private connectionStatus: ConnectionStatus = 'disconnected';
+  
+  // Queue monitoring
+  private messageQueue: EngineMessage[] = [];
+  private messageStats = {
+    totalReceived: 0,
+    totalProcessed: 0,
+    queueDepth: 0,
+    messageTypeCount: {} as Record<string, number>,
+    lastLogTime: Date.now(),
+  };
+  private readonly STATS_LOG_INTERVAL = 5000; // Log stats every 5 seconds
 
   /**
    * Connect to the WebSocket server
@@ -184,6 +212,13 @@ class EngineTickClient {
   }
 
   /**
+   * Get current queue statistics for debugging/monitoring
+   */
+  getStats() {
+    return this.getQueueStats();
+  }
+
+  /**
    * Stop the connection
    */
   disconnect(): void {
@@ -229,11 +264,70 @@ class EngineTickClient {
   private onMessageReceived(rawData: string) {
     try {
       const msg = JSON.parse(rawData) as EngineMessage;
-      console.log('[EngineTickClient] Received message:', msg.type);
-      this.messageHandlers.forEach((handler) => handler(msg));
+      
+      // Track statistics
+      this.messageStats.totalReceived++;
+      const msgType = msg.type;
+      this.messageStats.messageTypeCount[msgType] = (this.messageStats.messageTypeCount[msgType] || 0) + 1;
+      this.messageQueue.push(msg);
+      this.messageStats.queueDepth = this.messageQueue.length;
+      
+      // Process message immediately
+      this.messageHandlers.forEach((handler) => {
+        try {
+          handler(msg);
+        } catch (e) {
+          console.error('[EngineTickClient] Handler error:', e);
+        }
+      });
+      this.messageStats.totalProcessed++;
+      this.messageQueue.shift(); // Remove from queue after processing
+      
+      // Log stats periodically
+      const now = Date.now();
+      if (now - this.messageStats.lastLogTime >= this.STATS_LOG_INTERVAL) {
+        this.logQueueStats();
+        this.messageStats.lastLogTime = now;
+      }
     } catch (e) {
       console.error('[EngineTickClient] Failed to parse message:', e);
     }
+  }
+
+  /**
+   * Log current queue statistics to console and window object
+   */
+  private logQueueStats() {
+    const stats = {
+      queueDepth: this.messageStats.queueDepth,
+      totalReceived: this.messageStats.totalReceived,
+      totalProcessed: this.messageStats.totalProcessed,
+      lag: this.messageStats.totalReceived - this.messageStats.totalProcessed,
+      messageTypes: this.messageStats.messageTypeCount,
+    };
+    
+    console.log('[EngineTickClient] Queue Stats:', stats);
+    
+    // Also expose on window for easy inspection in DevTools console
+    (window as any).wsQueueStats = stats;
+    
+    // Alert if queue is building up
+    if (stats.lag > 100) {
+      console.warn('[EngineTickClient] WARNING: Message queue lag is', stats.lag, '- processing falling behind!');
+    }
+  }
+
+  /**
+   * Get current queue statistics
+   */
+  getQueueStats() {
+    return {
+      queueDepth: this.messageStats.queueDepth,
+      totalReceived: this.messageStats.totalReceived,
+      totalProcessed: this.messageStats.totalProcessed,
+      lag: this.messageStats.totalReceived - this.messageStats.totalProcessed,
+      messageTypes: { ...this.messageStats.messageTypeCount },
+    };
   }
 
   /**

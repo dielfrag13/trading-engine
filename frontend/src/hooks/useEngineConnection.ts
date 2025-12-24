@@ -9,6 +9,7 @@ import { useOrderStore, type Order as StoreOrder, type OrderStatus } from '../st
 export function useEngineConnection() {
   const addTick = useEventStore((s) => s.addTick);
   const addOrderFilled = useEventStore((s) => s.addOrderFilled);
+  const clearEvents = useEventStore((s) => s.clear);
 
   const addOrder = useOrderStore((s) => s.addOrder);
   const updateOrderStatus = useOrderStore((s) => s.updateOrderStatus);
@@ -18,6 +19,23 @@ export function useEngineConnection() {
 
   // Track processed messages to avoid duplicates from StrictMode
   const processedMessagesRef = useRef<Set<string>>(new Set());
+
+  // Throttle rendering: batch tick updates every 250ms instead of rendering each tick
+  const THROTTLE_MS = 250;
+  const pendingTicksRef = useRef<Array<{symbol: string; price: number; timestamp: string; ms?: number}>>([]);
+  const lastRenderTimeRef = useRef<number>(0);
+  const throttleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Helper to flush pending ticks - render the latest state
+  const flushPendingTicks = () => {
+    if (pendingTicksRef.current.length > 0) {
+      // Take only the LAST tick to avoid rendering intermediate states
+      const lastTick = pendingTicksRef.current[pendingTicksRef.current.length - 1];
+      addTick(lastTick.symbol, lastTick.price, lastTick.timestamp, lastTick.ms);
+      pendingTicksRef.current = [];
+      lastRenderTimeRef.current = Date.now();
+    }
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -45,6 +63,8 @@ export function useEngineConnection() {
         if (msg.type === 'RunStart') {
           const runStart = msg as RunStartMessage;
           console.log('[useEngineConnection] RunStart received (runId: ' + runStart.data.runId + ')');
+          // Automatically clear events from previous runs to maintain clean state
+          clearEvents();
         } 
         else if (msg.type === 'ProviderTick') {
           const tick = msg as ProviderTickMessage;
@@ -53,6 +73,39 @@ export function useEngineConnection() {
             tick.data.price,
             tick.data.timestamp
           );
+        }
+        else if (msg.type === 'ChartCandle') {
+          // Primary data source: aggregated candles from the backend
+          // Throttle rendering: queue updates and render in batches every 250ms
+          const candle = msg as any;
+          
+          // Queue the tick instead of rendering immediately
+          pendingTicksRef.current.push({
+            symbol: candle.data.symbol,
+            price: candle.data.close,
+            timestamp: candle.data.open_time,
+            ms: candle.data.ms,
+          });
+          
+          const now = Date.now();
+          const timeSinceLastRender = now - lastRenderTimeRef.current;
+          
+          // If we haven't rendered recently, flush immediately
+          if (timeSinceLastRender >= THROTTLE_MS) {
+            if (throttleTimerRef.current) {
+              clearTimeout(throttleTimerRef.current);
+              throttleTimerRef.current = null;
+            }
+            flushPendingTicks();
+          } else if (!throttleTimerRef.current) {
+            // Otherwise, schedule a flush for later
+            const timeUntilNextRender = THROTTLE_MS - timeSinceLastRender;
+            throttleTimerRef.current = setTimeout(() => {
+              throttleTimerRef.current = null;
+              flushPendingTicks();
+            }, timeUntilNextRender);
+          }
+          // If timer is already pending, do nothing - we'll flush when it fires
         }
         else if (msg.type === 'OrderPlaced') {
           const orderPlaced = msg as OrderPlacedMessage;
@@ -66,7 +119,7 @@ export function useEngineConnection() {
           }
           processedMessagesRef.current.add(msgKey);
           
-          console.log('[useEngineConnection] Order placed: #' + orderPlaced.data.orderId + ' (' + orderPlaced.data.side + ') at ' + orderPlaced.data.timestamp);
+          // Silenced: console.log('[useEngineConnection] Order placed...');
           const storeOrder: StoreOrder = {
             orderId: orderPlaced.data.orderId,
             symbol: orderPlaced.data.symbol,
@@ -90,7 +143,7 @@ export function useEngineConnection() {
           }
           processedMessagesRef.current.add(msgKey);
           
-          console.log('[useEngineConnection] Order filled: #' + orderFilled.data.orderId + ' at $' + orderFilled.data.fillPrice.toFixed(2) + ' on ' + orderFilled.data.timestamp);
+          // Silenced: console.log('[useEngineConnection] Order filled...');
           const status: OrderStatus = orderFilled.data.status === 'FILLED' ? 'FILLED' : 'PARTIALLY_FILLED';
           updateOrderStatus(
             orderFilled.data.orderId,
@@ -106,7 +159,8 @@ export function useEngineConnection() {
             orderFilled.data.side,
             orderFilled.data.fillPrice,
             orderFilled.data.filledQty,
-            orderFilled.data.timestamp
+            orderFilled.data.timestamp,
+            orderFilled.data.ms  // Use millisecond epoch if available
           );
           
           // Update position
@@ -149,6 +203,13 @@ export function useEngineConnection() {
       isMounted = false;
       unsubscribe();
       engineWS.disconnect();
+      // Clear any pending throttle timer
+      if (throttleTimerRef.current) {
+        clearTimeout(throttleTimerRef.current);
+        throttleTimerRef.current = null;
+      }
+      // Flush any remaining ticks
+      flushPendingTicks();
     };
   }, [addTick, addOrderFilled, addOrder, updateOrderStatus, rejectOrder, updatePosition, clearOrders]);
 }
