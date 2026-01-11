@@ -2,6 +2,8 @@
 #include "engine/EventBus.hpp"
 #include "engine/Types.hpp"
 #include "engine/MarketDataTypes.hpp"
+#include "engine/CandleStore.hpp"
+#include "engine/IBroker.hpp"
 #include <memory>
 #include <functional>
 #include <thread>
@@ -30,7 +32,7 @@ typedef WebSocketServerType::connection_ptr connection_ptr;
 
 class FrontendBridge {
 public:
-  explicit FrontendBridge(eng::EventBus& bus, int port = 3000);
+  explicit FrontendBridge(eng::EventBus& bus, eng::IBroker& broker, int port = 3000);
   ~FrontendBridge();
 
   // Start listening to EventBus and broadcasting ticks
@@ -42,8 +44,12 @@ public:
   // Get recent ticks (thread-safe)
   std::vector<json> get_recent_ticks(size_t limit = 100) const;
 
+  // Access to persistent candle store (shared with CandlePersister)
+  std::shared_ptr<eng::CandleStore> get_candle_store() { return candle_store_; }
+
 private:
   eng::EventBus& bus_;
+  eng::IBroker& broker_;
   int port_;
   std::atomic<bool> running_{false};
   mutable std::mutex ticks_mutex_;
@@ -52,6 +58,12 @@ private:
   std::string current_run_id_;
   std::unique_ptr<std::thread> ws_thread_;
   
+  // Persistent storage for candles and events (shared with CandlePersister)
+  std::shared_ptr<eng::CandleStore> candle_store_;
+  
+  // NOTE: Candle persistence moved to CandlePersister component
+  // No longer tracking flush counters here
+  
   // WebSocket server state
   mutable std::mutex ws_mutex_;
   std::unique_ptr<WebSocketServerType> ws_server_;
@@ -59,7 +71,6 @@ private:
 
   // Convert Tick to JSON and broadcast to all connected clients
   void on_provider_tick(const eng::Tick& tick);
-  void on_chart_candle(const eng::Candle& candle);
   void on_order_placed(const eng::Order& order);
   void on_order_filled(const eng::Order& order);
   void on_order_rejected(const eng::Order& order);
@@ -72,6 +83,17 @@ private:
   
   // WebSocket server thread function
   void run_ws_server();
+  
+  // Handle incoming WebSocket messages (queries, commands)
+  void handle_ws_message(websocketpp::connection_hdl hdl, const json& msg);
+  
+  // RPC query handlers (send response to specific client)
+  void handle_query_candles(websocketpp::connection_hdl hdl, const json& query, const std::string& request_id);
+  void handle_query_events(websocketpp::connection_hdl hdl, const json& query, const std::string& request_id);
+  void handle_query_balance(websocketpp::connection_hdl hdl, const std::string& request_id);
+  void handle_query_positions(websocketpp::connection_hdl hdl, const std::string& request_id);
+  void handle_query_orders(websocketpp::connection_hdl hdl, const std::string& request_id);
+  void handle_query_default_viewport(websocketpp::connection_hdl hdl, const std::string& request_id);
 };
 
 

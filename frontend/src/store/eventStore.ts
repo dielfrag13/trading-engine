@@ -58,11 +58,6 @@ export const useEventStore = create<EventState>((set, get) => ({
       // Insert in sorted order to maintain chronological sequence
       const newEvents = [...state.events, newEvent].sort((a, b) => a.ms - b.ms);
       
-      // Limit to last 500 events to avoid unbounded growth
-      if (newEvents.length > 500) {
-        newEvents.shift();
-      }
-      
       const newMinTime = newEvents.length > 0 ? newEvents[0].ms : null;
       const newMaxTime = newEvents.length > 0 ? newEvents[newEvents.length - 1].ms : null;
       
@@ -89,11 +84,6 @@ export const useEventStore = create<EventState>((set, get) => ({
       
       // Insert in sorted order
       const newEvents = [...state.events, newEvent].sort((a, b) => a.ms - b.ms);
-      
-      // Limit to last 500 events
-      if (newEvents.length > 500) {
-        newEvents.shift();
-      }
       
       const newMinTime = newEvents.length > 0 ? newEvents[0].ms : null;
       const newMaxTime = newEvents.length > 0 ? newEvents[newEvents.length - 1].ms : null;

@@ -15,6 +15,7 @@ export interface RunStartMessage {
   data: {
     runId: string;
     timestamp: string;
+    startingBalance?: number;  // From broker (optional for backward compatibility)
   };
 }
 
@@ -83,19 +84,105 @@ export interface ChartCandleMessage {
   };
 }
 
-export type EngineMessage = ProviderTickMessage | RunStartMessage | OrderPlacedMessage | OrderFilledMessage | OrderRejectedMessage | PositionUpdatedMessage | ChartCandleMessage;
+export interface QueryPositionsResponseMessage {
+  type: 'QueryPositionsResponse';
+  requestId: string;
+  data?: Array<{
+    symbol: string;
+    qty: number;
+  }>;
+  error?: string;
+}
+
+export interface QueryOrdersResponseMessage {
+  type: 'QueryOrdersResponse';
+  requestId: string;
+  data?: Array<{
+    orderId: number;
+    symbol: string;
+    qty: number;
+    side: 'Buy' | 'Sell';
+    status: string;
+    filledQty: number;
+    fillPrice: number;
+    timestamp: string;
+    rejectionReason?: string;
+  }>;
+  error?: string;
+}
+
+export interface QueryCandlesResponseMessage {
+  type: 'QueryCandlesResponse';
+  requestId: string;
+  data?: {
+    symbol: string;
+    resolutionMs: number;
+    candles: Array<{
+      open: number;
+      high: number;
+      low: number;
+      close: number;
+      volume: number;
+      open_time: string;
+      ms: number;
+    }>;
+    count: number;
+    isTruncated: boolean;
+  };
+  error?: string;
+}
+
+export interface QueryDefaultViewportResponseMessage {
+  type: 'QueryDefaultViewportResponse';
+  requestId: string;
+  data?: {
+    symbol: string;
+    startMs: number;
+    endMs: number;
+  };
+  error?: string;
+}
+
+export type EngineMessage = ProviderTickMessage | RunStartMessage | OrderPlacedMessage | OrderFilledMessage | OrderRejectedMessage | PositionUpdatedMessage | ChartCandleMessage | QueryOrdersResponseMessage | QueryPositionsResponseMessage | QueryCandlesResponseMessage | QueryDefaultViewportResponseMessage;
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
 
 /**
+ * Global response handler registry for RPC responses
+ */
+class ResponseHandlerRegistry {
+  private handlers = new Map<string, (data: any) => void>();
+
+  register(requestId: string, handler: (data: any) => void): void {
+    this.handlers.set(requestId, handler);
+  }
+
+  handle(requestId: string, data: any): boolean {
+    const handler = this.handlers.get(requestId);
+    if (handler) {
+      handler(data);
+      this.handlers.delete(requestId);
+      return true;
+    }
+    return false;
+  }
+
+  getHandlers(): Map<string, (data: any) => void> {
+    return this.handlers;
+  }
+}
+
+export const responseHandlerRegistry = new ResponseHandlerRegistry();
+
+/**
  * WebSocket client for receiving market ticks from the C++ backend
  */
-class EngineTickClient {
+export class EngineTickClient {
   private messageHandlers: Set<(msg: EngineMessage) => void> = new Set();
   private statusHandlers: Set<(status: ConnectionStatus) => void> = new Set();
   private ws: WebSocket | null = null;
   private reconnectInterval: ReturnType<typeof setInterval> | null = null;
-  private readonly wsUrl = 'ws://localhost:3000';
+  private readonly wsUrl = 'ws://localhost:8080';
   private reconnectAttempts = 0;
   private connectionStatus: ConnectionStatus = 'disconnected';
   
@@ -119,36 +206,56 @@ class EngineTickClient {
       return;
     }
 
+    // Clear any existing WebSocket before creating a new one
+    if (this.ws) {
+      console.log('[EngineTickClient] Closing existing WebSocket before reconnect');
+      this.ws.onclose = null; // Remove handler to prevent reconnect loop
+      this.ws.close();
+      this.ws = null;
+    }
+
     this.setStatus('connecting');
     console.log('[EngineTickClient] Connecting to WebSocket:', this.wsUrl);
     
     return new Promise((resolve, reject) => {
       try {
-        this.ws = new WebSocket(this.wsUrl);
+        const newWs = new WebSocket(this.wsUrl);
 
-        this.ws.onopen = () => {
-          console.log('[EngineTickClient] WebSocket connected');
-          this.reconnectAttempts = 0;
-          this.setStatus('connected');
-          resolve();
+        newWs.onopen = () => {
+          // Only update if this is still the current WebSocket
+          if (this.ws === newWs) {
+            console.log('[EngineTickClient] WebSocket connected');
+            this.reconnectAttempts = 0;
+            this.setStatus('connected');
+            resolve();
+          }
         };
 
-        this.ws.onmessage = (event) => {
-          this.onMessageReceived(event.data);
+        newWs.onmessage = (event) => {
+          if (this.ws === newWs) {
+            this.onMessageReceived(event.data);
+          }
         };
 
-        this.ws.onerror = (error) => {
-          console.error('[EngineTickClient] WebSocket error:', error);
-          this.setStatus('error');
-          reject(error);
+        newWs.onerror = (error) => {
+          if (this.ws === newWs) {
+            console.error('[EngineTickClient] WebSocket error:', error);
+            this.setStatus('error');
+            reject(error);
+          }
         };
 
-        this.ws.onclose = () => {
-          console.log('[EngineTickClient] WebSocket disconnected');
-          this.ws = null;
-          this.setStatus('disconnected');
-          this.startReconnect();
+        newWs.onclose = () => {
+          if (this.ws === newWs) {
+            console.log('[EngineTickClient] WebSocket disconnected');
+            this.ws = null;
+            this.setStatus('disconnected');
+            this.startReconnect();
+          }
         };
+        
+        // Assign the new WebSocket AFTER setting up handlers
+        this.ws = newWs;
       } catch (e) {
         console.error('[EngineTickClient] Failed to create WebSocket:', e);
         this.setStatus('error');
@@ -201,7 +308,75 @@ class EngineTickClient {
    * Check if connected
    */
   isConnected(): boolean {
-    return this.connectionStatus === 'connected';
+    // Check both the state variable AND the actual WebSocket readyState
+    // This ensures we don't report as connected if the WebSocket closed unexpectedly
+    const statusCheck = this.connectionStatus === 'connected';
+    const wsNotNull = this.ws !== null;
+    const readyStateCheck = this.ws !== null && this.ws.readyState === WebSocket.OPEN;
+    const result = statusCheck && wsNotNull && readyStateCheck;
+    
+    // Debug logging when there's a discrepancy
+    if (statusCheck && (!wsNotNull || !readyStateCheck)) {
+      console.log('[EngineTickClient] isConnected() discrepancy:', {
+        status: this.connectionStatus,
+        wsNotNull,
+        readyState: this.ws?.readyState,
+        OPEN: WebSocket.OPEN,
+        result
+      });
+    }
+    
+    return result;
+  }
+
+  /**
+   * Send a QueryPositions request to get current positions from backend
+   */
+  queryPositions(requestId: string): void {
+    const msg = {
+      type: 'QueryPositions',
+      requestId,
+    };
+    this.send(msg);
+  }
+
+  /**
+   * Send a QueryOrders request to get all orders from backend
+   */
+  queryOrders(requestId: string): void {
+    const msg = {
+      type: 'QueryOrders',
+      requestId,
+    };
+    this.send(msg);
+  }
+
+  /**
+   * Send a QueryCandles request to get candles for a symbol/timeframe/range
+   */
+  queryCandles(requestId: string, symbol: string, resolutionMs: number, startMs: number, endMs: number): void {
+    const msg = {
+      type: 'QueryCandles',
+      requestId,
+      data: {
+        symbol,
+        resolutionMs,
+        startMs,
+        endMs,
+      },
+    };
+    this.send(msg);
+  }
+
+  /**
+   * Query the default viewport from backend (e.g., last 24h of data)
+   */
+  queryDefaultViewport(requestId: string): void {
+    const msg = {
+      type: 'QueryDefaultViewport',
+      requestId,
+    };
+    this.send(msg);
   }
 
   /**
@@ -271,6 +446,17 @@ class EngineTickClient {
       this.messageStats.messageTypeCount[msgType] = (this.messageStats.messageTypeCount[msgType] || 0) + 1;
       this.messageQueue.push(msg);
       this.messageStats.queueDepth = this.messageQueue.length;
+      
+      // Log query responses
+      if (msgType === 'QueryOrdersResponse' || msgType === 'QueryPositionsResponse' || msgType === 'QueryDefaultViewportResponse' || msgType === 'QueryCandlesResponse') {
+        console.log(`[EngineTickClient] Received ${msgType} with requestId:`, (msg as any).requestId);
+        
+        // Try to handle via registry first (for manual queries, etc)
+        const requestId = (msg as any).requestId;
+        if (requestId && responseHandlerRegistry.handle(requestId, msg)) {
+          console.log(`[EngineTickClient] Handled ${msgType} via registry`);
+        }
+      }
       
       // Process message immediately
       this.messageHandlers.forEach((handler) => {

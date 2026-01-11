@@ -32,12 +32,38 @@ double NullBroker::place_market_order(const eng::Order& order) {
     double fill_price = pd.last;
     double filled = 0.0;
 
+    // Create order record with ID and timestamp
+    eng::Order exec_order = order;
+    exec_order.id = generate_order_id();
+    exec_order.timestamp = std::chrono::system_clock::now();
+
     if (order.side == eng::Order::Side::Buy) {
-        // Buy logic: unchanged - add to position and deduct from balance
+        // Buy logic: check balance first
         double value = fill_price * order.qty;
+        if (balance_ < value) {
+            std::ostringstream ss;
+            ss << std::fixed << std::setprecision(2);
+            ss << "NullBroker: Insufficient balance for buy. Need " << value 
+               << " but have " << balance_ << " for " << order.qty << " " << order.symbol;
+            std::cout << ss.str() << '\n';
+            
+            // Track rejected order
+            exec_order.status = eng::OrderStatus::REJECTED;
+            exec_order.rejection_reason = "Insufficient balance";
+            orders_.push_back(exec_order);
+            
+            return 0.0;  // Order rejected
+        }
         balance_ -= value;
         positions_[order.symbol] += order.qty;
         filled = order.qty;
+        
+        // Track filled order
+        exec_order.status = eng::OrderStatus::FILLED;
+        exec_order.filled_qty = filled;
+        exec_order.fill_price = fill_price;
+        orders_.push_back(exec_order);
+        
         std::ostringstream ss;
         ss << std::fixed << std::setprecision(2);
         ss << "NullBroker: Bought " << order.qty << " of " << order.symbol
@@ -48,12 +74,25 @@ double NullBroker::place_market_order(const eng::Order& order) {
         double position = positions_[order.symbol];
         if (position <= 0.0) {
             std::cout << "NullBroker: No position to sell for " << order.symbol << "\n";
+            
+            // Track rejected order
+            exec_order.status = eng::OrderStatus::REJECTED;
+            exec_order.rejection_reason = "No position to sell";
+            orders_.push_back(exec_order);
+            
             return 0.0;
         }
         double value = fill_price * position;
         balance_ += value;
         positions_[order.symbol] = 0.0;
         filled = position;
+        
+        // Track filled order
+        exec_order.status = eng::OrderStatus::FILLED;
+        exec_order.filled_qty = filled;
+        exec_order.fill_price = fill_price;
+        orders_.push_back(exec_order);
+        
         std::ostringstream ss;
         ss << std::fixed << std::setprecision(2);
         ss << "NullBroker: Sold " << position << " of " << order.symbol
@@ -107,8 +146,33 @@ double NullBroker::place_limit_order(const eng::Order& order, double limit_price
 
     if (execute) {
         if (order.side == eng::Order::Side::Buy) {
-            // Buy logic: add to position and deduct from balance
+            // Buy logic: check balance first
             double value = market * order.qty;
+            std::cout << "[NullBroker] Limit buy check: need=" << value << " balance=" << balance_ << "\n";
+            if (balance_ < value) {
+                std::ostringstream ss;
+                ss << std::fixed << std::setprecision(2);
+                ss << "[NullBroker] REJECTED limit buy: Need " << value 
+                   << " but have " << balance_ << " for " << order.qty << " " << order.symbol;
+                std::cout << ss.str() << '\n';
+                
+                // Publish OrderRejected event
+                if (bus_) {
+                    std::cout << "[NullBroker] Publishing OrderRejected event\n";
+                    exec_order.status = eng::OrderStatus::REJECTED;
+                    exec_order.rejection_reason = "Insufficient balance";
+                    eng::Event ev;
+                    ev.type = "OrderRejected";
+                    ev.data = std::make_any<eng::Order>(exec_order);
+                    bus_->publish(ev);
+                } else {
+                    std::cerr << "[NullBroker] WARNING: bus_ is null, cannot publish OrderRejected!\n";
+                }
+                
+                // Track rejected order
+                orders_.push_back(exec_order);
+                return 0.0;  // Order rejected
+            }
             balance_ -= value;
             positions_[order.symbol] += order.qty;
             filled = order.qty;
@@ -131,6 +195,9 @@ double NullBroker::place_limit_order(const eng::Order& order, double limit_price
                 ev.data = std::make_any<eng::Order>(exec_order);
                 bus_->publish(ev);
             }
+            
+            // Track filled order
+            orders_.push_back(exec_order);
         } else {
             // Sell logic: sell entire position at limit price
             double position = positions_[order.symbol];
@@ -146,6 +213,9 @@ double NullBroker::place_limit_order(const eng::Order& order, double limit_price
                     ev.data = std::make_any<eng::Order>(exec_order);
                     bus_->publish(ev);
                 }
+                
+                // Track rejected order
+                orders_.push_back(exec_order);
                 return 0.0;
             }
             double value = market * position;
@@ -172,6 +242,9 @@ double NullBroker::place_limit_order(const eng::Order& order, double limit_price
                 ev.data = std::make_any<eng::Order>(exec_order);
                 bus_->publish(ev);
             }
+            
+            // Track filled order
+            orders_.push_back(exec_order);
         }
     } else {
         std::ostringstream ss;
@@ -210,5 +283,14 @@ void NullBroker::subscribe_to_ticks(const std::string& symbol,
 }
 //*/
 
+std::unordered_map<std::string, double> NullBroker::get_positions() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return positions_;
+}
+
+std::vector<eng::Order> NullBroker::get_orders() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return orders_;
+}
 
 } // namespace broker

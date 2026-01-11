@@ -97,26 +97,15 @@ void Engine::run() {
         }
     });
 
-    std::cout << "[Engine] sleeping for like 45 seconds.\n";
+    std::cout << "[Engine] Backtest/demo running. Press Ctrl+C to exit.\n";
     
-    // Sleep with periodic checks for shutdown signal
-    auto start = std::chrono::steady_clock::now();
-    auto duration = std::chrono::seconds(45);
-    
+    // Wait for shutdown signal
     while (!shutdown_requested_) {
-        auto elapsed = std::chrono::steady_clock::now() - start;
-        if (elapsed >= duration) {
-            break;
-        }
-        
         // Check shutdown every 100ms
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     
-    if (shutdown_requested_) {
-        std::cout << "[Engine] Shutdown requested - stopping run early.\n";
-    }
-    
+    std::cout << "[Engine] Shutdown requested - stopping run.\n";
     std::cout << "[Engine] Run complete.\n";
 }
 

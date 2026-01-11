@@ -171,44 +171,266 @@ Keeps the UI visually clean and consistent.
 
 
 
-# current directory structure
+# 🏗️ Frontend State Management Architecture
+
+The frontend uses a **unified event timeline** approach where all events (price ticks and order fills) are stored chronologically with precise millisecond timestamps. This enables efficient filtering, deduplication, and interactive charting without run-based state.
+
+## Core Stores (Zustand)
+
+### `eventStore.ts` - Single Source of Truth for Events
+**Purpose:** Unified timeline of all market ticks and order fills.
+
+**State:**
+```typescript
+{
+  events: ChartEvent[],        // Chronological list of all events
+  minTime: number | null,      // Earliest timestamp in ms
+  maxTime: number | null,      // Latest timestamp in ms
+}
+```
+
+**Event Types:**
+- `TickEvent`: `{ type: 'tick', symbol, price, timestamp, ms }`
+- `OrderFilledEvent`: `{ type: 'orderFilled', orderId, symbol, side, fillPrice, filledQty, timestamp, ms }`
+
+**Key Methods:**
+- `addTick(symbol, price, timestamp)` - Add price tick
+- `addOrderFilled(orderId, symbol, side, fillPrice, filledQty, timestamp)` - Add order fill
+- `getAllEvents()` - Get all events (automatically sorted)
+- `getEventsByTimeRange(startMs, endMs)` - Filter events by viewport bounds
+- `clear()` - Reset timeline (useful for clearing chart data)
+
+**Design Note:** Events are keyed by `orderId-timestamp` for deduplication. This allows the same order ID to appear across multiple engine runs without creating duplicates.
+
+---
+
+### `chartStore.ts` - Viewport Management
+**Purpose:** Track user's zoom level, pan position, and auto-scroll state.
+
+**State:**
+```typescript
+{
+  viewportStartMs: number | null,  // Left edge of visible window
+  viewportEndMs: number | null,    // Right edge of visible window
+  autoScroll: boolean,             // Following latest data?
+}
+```
+
+**Key Methods:**
+- `zoomIn()` / `zoomOut()` - Adjust magnification (respects data bounds)
+- `zoomToPreset(preset)` - Jump to preset: '1m', '5m', '15m', '1h', 'fit-all'
+- `pan(deltaMs)` - Scroll left/right
+- `setAutoScroll(enabled)` - Toggle following latest
+- `resetViewport()` - Return to full data view
+- `setDataBounds(minMs, maxMs)` - Update when events arrive
+
+**Design Note:** Viewport always has 5% buffer beyond data to prevent edge scrolling artifacts.
+
+---
+
+## Interaction Hooks
+
+### `useChartZoom.ts` - User Input Handler
+**Purpose:** Convert mouse/keyboard input into chart actions.
+
+**Exports:**
+```typescript
+{
+  zoomIn: () => void,
+  zoomOut: () => void,
+  setAutoScroll: (enabled: boolean) => void,
+  resetViewport: () => void,
+}
+```
+
+**Interactions Handled:**
+- **Scroll wheel:** Zoom in/out
+- **Ctrl+Drag:** Pan left/right
+- **Preset buttons:** Jump to timeframe
+- **Follow Latest toggle:** Click to enable/disable auto-scroll
+
+**Integration:** Attached to chart container ref to capture events.
+
+---
+
+## Utilities
+
+### `timeBuckets.ts` - Responsive Axis Labels
+**Purpose:** Calculate appropriate label granularity based on zoom level.
+
+**Function:** `calculateTimeBucket(startMs, endMs, containerWidthPx)`
+
+**Returns:** `{ intervalMs, format }`
+
+**Strategy:** Maintains ~15 visible labels across viewport, choosing from 250ms up to 1 month intervals.
+
+**Example:** 
+- Zoomed to 1 minute: Shows every 5 seconds
+- Zoomed to 1 hour: Shows every 5 minutes
+- Viewing all data: Shows daily/weekly labels
+
+---
+
+## WebSocket Integration
+
+### `useEngineConnection.ts` - Event Dispatch
+**Purpose:** Listen for WebSocket messages and populate stores.
+
+**Flow:**
+```
+WebSocket message arrives
+    ↓
+Parse JSON by message.type
+    ↓
+If 'ProviderTick': Add to eventStore with timestamp
+If 'OrderFilled': Add to eventStore with timestamp
+If 'Position': Update positionStore
+    ↓
+Zustand stores trigger component re-renders
+```
+
+**Deduplication Key:** `orderId-timestamp`
+- Prevents duplicate processing if same message arrives twice
+- Allows same order ID on subsequent engine runs
+
+---
+
+# Directory Structure
 
 ```
 frontend/
 │
 ├── src/
 │   ├── components/
-│   │   ├── charts/
-│   │   │   └── PriceChart.tsx
-│   │   ├── panels/
-│   │   │   ├── StrategyPanel.tsx
-│   │   │   ├── PositionsPanel.tsx
-│   │   │   └── EngineStatus.tsx
-│   │   └── widgets/
-│   │       ├── MetricCard.tsx
-│   │       └── ActionButton.tsx
+│   │   ├── PriceChart.tsx          // Interactive chart with buy/sell markers
+│   │   ├── OrdersPanel.tsx         // Recent orders with pagination
+│   │   ├── PositionsPanel.tsx      // Current holdings with P&L
+│   │   ├── AccountPanel.tsx        // Portfolio summary
+│   │   ├── EngineStatus.tsx        // Engine health indicator
+│   │   └── App.tsx                 // Main layout grid
+│   │
+│   ├── store/
+│   │   ├── eventStore.ts           // Unified tick + order fill timeline
+│   │   ├── chartStore.ts           // Viewport & zoom state
+│   │   ├── orderStore.ts           // Order and position tracking
+│   │   └── positionStore.ts        // Current holdings
 │   │
 │   ├── hooks/
-│   │   ├── useEngineStatus.ts
-│   │   └── useLiveTicks.ts
+│   │   ├── useChartZoom.ts         // Mouse/keyboard input handling
+│   │   └── useEngineConnection.ts  // WebSocket listener
+│   │
+│   ├── utils/
+│   │   └── timeBuckets.ts          // Responsive axis label calculation
 │   │
 │   ├── api/
-│   │   ├── websocket.ts
-│   │   └── rest.ts
+│   │   └── engineWS.ts             // WebSocket client
 │   │
-│   ├── theme/
-│   │   └── index.ts
-│   │
-│   ├── pages/
-│   │   ├── Dashboard.tsx
-│   │   └── Settings.tsx
-│   │
-│   ├── App.tsx
-│   └── main.tsx
+│   ├── App.css
+│   ├── index.css
+│   ├── main.tsx
+│   └── theme.ts
+│
+├── public/
+│   └── ticks.jsonl                 // Sample tick data
 │
 ├── index.html
-└── package.json
+├── package.json
+├── vite.config.ts
+├── tsconfig.json
+└── eslint.config.js
 ```
+
+---
+
+# 📊 Key Features
+
+## PriceChart Component
+
+### Interactive Zoom & Pan
+- **Scroll wheel:** Zoom in/out (respects data bounds with 5% buffer)
+- **Ctrl+Drag:** Pan left/right across timeline
+- **Preset buttons:** Quick jump to 1m, 5m, 15m, 1h, or fit-all views
+- **Auto-scroll:** Toggle "Following latest" mode at any zoom level (not just fit-all)
+
+### Buy/Sell Markers
+- Green dots (🟢) indicate BUY order fills
+- Red dots (🔴) indicate SELL order fills
+- Markers persist correctly across multiple engine runs (keyed by `orderId-timestamp`)
+- Hovering shows detailed info: price, quantity, and dollar impact
+
+### Enhanced Tooltips
+When hovering over a marker, displays:
+- **Time:** When order filled
+- **Price:** Current market price
+- **Order Info:** BUY/SELL with fill price
+- **Quantity:** How much was bought/sold
+- **Dollar Impact:** Debit (red, −) for buys; credit (green, +) for sells
+
+### Y-Axis Optimization
+- Tight padding (±0.5 units) to maximize chart space
+- Increased chart height (600px) with scrolling support
+- Dynamic scaling based on data range
+
+---
+
+## OrdersPanel Component
+
+### Live Order History
+- Shows recent orders with Time, Symbol, Side, Qty, Filled, Price, Status
+- Status badges: WORKING, FILLED, REJECTED with color coding
+- **Pagination:** Display 10 orders per page with Prev/Next navigation
+- Page counter shows current position (e.g., "Page 2 of 5")
+
+### Button Styling
+- Consistent with PriceChart buttons (white bg, black bold text, dark borders)
+- Prev/Next buttons disable at boundaries
+- Clear button to reset data
+
+---
+
+## AccountPanel & PositionsPanel
+
+### Real-time Updates
+- Both panels update instantly as order fills arrive
+- P&L recalculates on every new tick
+- Badges show color-coded status (green for gains, red for losses)
+
+---
+
+# 🚀 Development & Build
+
+## Quick Start
+
+```bash
+cd frontend
+npm install          # Install dependencies
+npm run dev          # Start dev server (http://localhost:5173)
+npm run build        # Build for production
+npm run preview      # Preview production build locally
+npm run lint         # Check code style
+```
+
+## Development Server
+
+```bash
+npm run dev
+```
+
+- Opens on http://localhost:5173
+- Hot Module Reloading (HMR) active: changes appear instantly
+- WebSocket connects to engine on localhost:8080
+
+## Production Build
+
+```bash
+npm run build
+```
+
+- Minifies and bundles all code
+- Output in `dist/` directory
+- Ready to deploy to any static host
+
+---
 
 
 

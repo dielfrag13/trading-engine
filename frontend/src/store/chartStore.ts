@@ -4,7 +4,19 @@ import { create } from 'zustand';
 
 export type ZoomPreset = '1m' | '5m' | '15m' | '1h' | '1d' | '1w' | '1y' | 'fit-all';
 
+export interface Candle {
+  time: number; // timestamp in ms
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
 type ChartState = {
+  // Candle data
+  candles: Candle[];
+  
   // Viewport control
   viewportStartMs: number | null;
   viewportEndMs: number | null;
@@ -21,7 +33,10 @@ type ChartState = {
   dataMaxMs: number | null;
   
   // Methods
+  setCandles: (candles: Candle[]) => void;
   setDataBounds: (minMs: number | null, maxMs: number | null) => void;
+  setViewportStartMs: (ms: number) => void;
+  setViewportEndMs: (ms: number) => void;
   zoomIn: () => void;
   zoomOut: () => void;
   zoomToPreset: (preset: ZoomPreset) => void;
@@ -43,12 +58,25 @@ const ZOOM_PRESET_RANGES: Record<ZoomPreset, number> = {
 };
 
 export const useChartStore = create<ChartState>((set) => ({
+  candles: [],
   viewportStartMs: null,
   viewportEndMs: null,
   zoomLevel: 50,
   autoScroll: true,
   dataMinMs: null,
   dataMaxMs: null,
+
+  setCandles: (candles: Candle[]) =>
+    set(() => {
+      console.log('[chartStore] setCandles: received', candles.length, 'candles');
+      return { candles };
+    }),
+
+  setViewportStartMs: (ms: number) =>
+    set(() => ({ viewportStartMs: ms })),
+
+  setViewportEndMs: (ms: number) =>
+    set(() => ({ viewportEndMs: ms })),
 
   setDataBounds: (minMs: number | null, maxMs: number | null) =>
     set((state) => {

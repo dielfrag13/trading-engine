@@ -2,44 +2,44 @@
 
 #include "engine/EventBus.hpp"
 #include "engine/MarketDataTypes.hpp"
+#include "engine/CandleStore.hpp"
 #include <unordered_map>
+#include <memory>
 #include <chrono>
-
 
 namespace eng {
 
 /**
- * ChartAggregator
+ * CandlePersister
  * 
- * Subscribes to TradePrint events and coalesces them into OHLCV candles
- * at configurable time intervals. Emits ChartCandle events to the EventBus
- * for visualization purposes.
+ * Real-time write path: subscribes to TradePrint events, aggregates trades
+ * into 1-second OHLCV candles, and persists them directly to the database.
+ * 
+ * This is Component A of the candle pipeline:
+ * - TradePrint events → 1s candle bucketing → sparse database storage
  * 
  * Event-driven design: emits a bucket when a trade arrives in the NEXT bucket,
- * ensuring we only publish complete, finalized candles. This aligns with the
- * reactive pub/sub architecture of the trading engine.
+ * ensuring we only store complete, finalized candles.
  * 
- * Raw trade data flows through to strategies for accuracy.
- * Aggregated candles flow to the frontend for charting.
- * 
- * Future brokers can emit Candle events directly if they provide OHLC data.
+ * Does NOT emit events or interact with frontend - pure persistence layer.
  */
-class ChartAggregator {
+class CandlePersister {
 public:
     /**
-     * Create aggregator with interval in milliseconds.
-     * @param bus Reference to the EventBus for publishing candles
-     * @param interval_ms Aggregation interval (default 1000ms = 1 second)
+     * Create persister with event bus and candle store.
+     * @param bus Reference to EventBus for subscribing to TradePrint events
+     * @param store Shared pointer to CandleStore for database persistence
+     * @param interval_ms Aggregation interval in milliseconds (default 1000ms = 1 second)
      */
-    explicit ChartAggregator(EventBus& bus, int interval_ms = 1000)
-        : bus_(bus), interval_ms_(interval_ms), running_(false) {}
+    explicit CandlePersister(EventBus& bus, std::shared_ptr<CandleStore> store, int interval_ms = 1000)
+        : bus_(bus), store_(store), interval_ms_(interval_ms), running_(false) {}
 
-    ~ChartAggregator() {
+    ~CandlePersister() {
         stop();
     }
 
     /**
-     * Start aggregating. Begins collecting trades and emitting candles.
+     * Start aggregating and persisting candles.
      */
     void start() {
         if (running_) return;
@@ -57,12 +57,17 @@ public:
     }
 
     /**
-     * Stop aggregating and emit any pending candle.
+     * Stop aggregating and persist any pending candle.
      */
     void stop() {
         if (!running_) return;
         running_ = false;
-        emit_pending_candle();
+        persist_all_pending();
+        
+        // Final flush to ensure everything is written
+        if (store_) {
+            store_->flush_all();
+        }
     }
 
 private:
@@ -77,6 +82,7 @@ private:
     };
 
     EventBus& bus_;
+    std::shared_ptr<CandleStore> store_;
     int interval_ms_;
     bool running_;
 
@@ -103,9 +109,9 @@ private:
     }
 
     /**
-     * Emit the current candle for a symbol if it has data.
+     * Persist the current candle for a symbol if it has data.
      */
-    void emit_candle_for_symbol(const std::string& symbol) {
+    void persist_candle_for_symbol(const std::string& symbol) {
         auto it = current_candles_.find(symbol);
         if (it != current_candles_.end() && it->second.has_data) {
             CandleBuffer& buf = it->second;
@@ -119,24 +125,26 @@ private:
                 .volume = buf.volume
             };
 
-            Event ev{"ChartCandle", candle};
-            bus_.publish(ev);
+            // Write directly to database (buffered with automatic flushing)
+            if (store_) {
+                store_->add_candle(symbol, interval_ms_, candle, "backtest");
+            }
         }
     }
 
     /**
-     * Emit any pending candle on shutdown.
+     * Persist all pending candles (called on shutdown).
      */
-    void emit_pending_candle() {
+    void persist_all_pending() {
         for (auto& [symbol, _] : current_candles_) {
-            emit_candle_for_symbol(symbol);
+            persist_candle_for_symbol(symbol);
         }
     }
 
     /**
      * Called when a TradePrint event arrives.
      * Checks if the trade belongs to a new time bucket.
-     * If so, emits the previous candle and starts a new one.
+     * If so, persists the previous candle and starts a new one.
      */
     void on_trade(const TradePrint& tp) {
         long bucket_key = get_bucket_key(tp.ts);
@@ -144,9 +152,9 @@ private:
         auto bucket_it = current_buckets_.find(tp.symbol);
         long current_bucket = (bucket_it != current_buckets_.end()) ? bucket_it->second : -1;
         
-        // If this trade is in a different bucket, emit the previous candle
+        // If this trade is in a different bucket, persist the previous candle
         if (current_bucket != -1 && bucket_key != current_bucket) {
-            emit_candle_for_symbol(tp.symbol);
+            persist_candle_for_symbol(tp.symbol);
             current_candles_[tp.symbol].has_data = false;
             current_candles_[tp.symbol].volume = 0.0;
         }

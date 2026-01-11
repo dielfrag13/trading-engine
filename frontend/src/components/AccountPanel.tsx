@@ -12,13 +12,31 @@ import { useMemo } from 'react';
 import { useOrderStore } from '../store/orderStore';
 import { useTickStore } from '../store/tickStore';
 
-const STARTING_BALANCE = 10000; // Default starting balance for demo
-
 export function AccountPanel() {
   const orders = useOrderStore((s) => s.orders);
   const positionsMap = useOrderStore((s) => s.positions);
+  const startingBalance = useOrderStore((s) => s.startingBalance);
   const positions = useMemo(() => Array.from(positionsMap.values()), [positionsMap]);
   const ticks = useTickStore((s) => s.ticks);
+
+  // If no starting balance from backend yet, show N/A
+  if (startingBalance === null) {
+    return (
+      <Card.Root height="100%">
+        <Card.Header pb={2}>
+          <Heading size="md">Account Summary</Heading>
+        </Card.Header>
+        <Card.Body>
+          <VStack gap={4} align="stretch">
+            <Box>
+              <Text fontSize="xs" color="gray.500" mb={1}>STARTING BALANCE</Text>
+              <Text fontSize="lg" fontWeight="bold">Waiting for engine...</Text>
+            </Box>
+          </VStack>
+        </Card.Body>
+      </Card.Root>
+    );
+  }
 
   // Get the latest price
   const latestPrice = ticks.length > 0 ? ticks[ticks.length - 1].last : 0;
@@ -47,10 +65,10 @@ export function AccountPanel() {
   });
 
   // Calculate available cash
-  const availableCash = STARTING_BALANCE - cashUsed;
+  const availableCash = startingBalance - cashUsed;
   const totalValue = availableCash + unrealizedPnL;
-  const dayPnL = totalValue - STARTING_BALANCE;
-  const returnPercent = (dayPnL / STARTING_BALANCE) * 100;
+  const dayPnL = totalValue - startingBalance;
+  const returnPercent = (dayPnL / startingBalance) * 100;
 
   const pnlColor = (pnl: number) => {
     if (pnl > 0) return 'green';
@@ -68,7 +86,7 @@ export function AccountPanel() {
           {/* Account Balance Section */}
           <Box>
             <Text fontSize="xs" color="gray.500" mb={1}>STARTING BALANCE</Text>
-            <Text fontSize="lg" fontWeight="bold">${STARTING_BALANCE.toFixed(2)}</Text>
+            <Text fontSize="lg" fontWeight="bold">${startingBalance.toFixed(2)}</Text>
           </Box>
 
           <Box height="1px" bg="gray.700" />

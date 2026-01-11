@@ -1,5 +1,5 @@
 // frontend/src/components/PriceChart.tsx
-import { Card, Heading, Button, Text, Box } from '@chakra-ui/react';
+import { Card, Heading, Button, Text, Box, Input } from '@chakra-ui/react';
 import {
   XAxis,
   YAxis,
@@ -11,22 +11,29 @@ import {
   ReferenceDot,
 } from 'recharts';
 import { useMemo, useRef, useEffect, useState } from 'react';
-import { useEventStore, type TickEvent } from '../store/eventStore';
+import DatePicker from 'react-datepicker';
+import 'react-datepicker/dist/react-datepicker.css';
+import { useEventStore } from '../store/eventStore';
+import { useOrderStore } from '../store/orderStore';
 import { useChartStore } from '../store/chartStore';
 import { useChartZoom } from '../hooks/useChartZoom';
 import { calculateTimeBucket, generateTimeBuckets, formatDateRange } from '../utils/timeBuckets';
-import { engineWS } from '../api/engineWS';
+import { engineWS, responseHandlerRegistry } from '../api/engineWS';
 
 export function PriceChart() {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   
-  // Event store
+  // Event store (kept for backward compatibility, but not used for chart data anymore)
   const events = useEventStore((s) => s.getAllEvents());
   const minTime = useEventStore((s) => s.minTime);
   const maxTime = useEventStore((s) => s.maxTime);
   const clearEvents = useEventStore((s) => s.clear);
 
+  // Order store for buy/sell markers
+  const orders = useOrderStore((s) => s.orders);
+
   // Chart store
+  const candles = useChartStore((s) => s.candles);
   const viewportStartMs = useChartStore((s) => s.viewportStartMs);
   const viewportEndMs = useChartStore((s) => s.viewportEndMs);
   const autoScroll = useChartStore((s) => s.autoScroll);
@@ -43,6 +50,89 @@ export function PriceChart() {
 
   // Track container width for responsive buckets
   const [containerWidth, setContainerWidth] = useState(0);
+  
+  // Manual query widget state
+  const [showManualQuery, setShowManualQuery] = useState(false);
+  const [manualStartDate, setManualStartDate] = useState<Date | null>(null);
+  const [manualEndDate, setManualEndDate] = useState<Date | null>(null);
+  const [manualResolution, setManualResolution] = useState('60000'); // Default 1m
+  const [manualQueryStatus, setManualQueryStatus] = useState('');
+  const [timezone, setTimezone] = useState('UTC'); // Add timezone
+  
+  useEffect(() => {
+    // Initialize manual query with current viewport if available
+    if (viewportStartMs && viewportEndMs && !manualStartDate) {
+      setManualStartDate(new Date(viewportStartMs));
+      setManualEndDate(new Date(viewportEndMs));
+    }
+  }, [viewportStartMs, viewportEndMs, manualStartDate]);
+  
+  const handleManualQuery = () => {
+    try {
+      if (!manualStartDate || !manualEndDate) {
+        setManualQueryStatus('Please select both start and end dates/times');
+        return;
+      }
+      
+      const startMs = manualStartDate.getTime();
+      const endMs = manualEndDate.getTime();
+      const resolutionMs = parseInt(manualResolution, 10);
+      
+      if (startMs >= endMs) {
+        setManualQueryStatus('Start time must be before end time');
+        return;
+      }
+      
+      const durationHours = ((endMs - startMs) / 3600000).toFixed(2);
+      
+      const resolutionMap: { [key: string]: string } = {
+        '1000': '1s', '5000': '5s', '15000': '15s', '30000': '30s',
+        '60000': '1m', '300000': '5m', '900000': '15m', '1800000': '30m',
+        '3600000': '1h', '14400000': '4h', '86400000': '1d'
+      };
+      
+      const requestId = 'manual_query';
+      setManualQueryStatus(`Querying ${durationHours}h at ${resolutionMap[manualResolution] || manualResolution + 'ms'} (${timezone})...`);
+      console.log('[ManualQuery] Requesting:', {
+        requestId,
+        startMs, endMs, resolutionMs, durationHours, timezone,
+        startDate: manualStartDate.toISOString(),
+        endDate: manualEndDate.toISOString()
+      });
+      
+      // Register response handler before sending query
+      responseHandlerRegistry.register(requestId, (response: any) => {
+        console.log('[ManualQuery] Response received:', response);
+        if (response.error) {
+          setManualQueryStatus(`Error: ${response.error}`);
+          return;
+        }
+        if (response.data && response.data.candles) {
+          const candleCount = response.data.candles.length;
+          setManualQueryStatus(`✓ Received ${candleCount} candles. Updating chart...`);
+          console.log('[ManualQuery] Received', candleCount, 'candles at resolution', resolutionMap[manualResolution]);
+          
+          // Store candles in chart store
+          const candles = response.data.candles.map((c: any) => ({
+            time: c.ms,
+            open: c.open,
+            high: c.high,
+            low: c.low,
+            close: c.close,
+            volume: c.volume || 0,
+          }));
+          
+          useChartStore.getState().setCandles(candles);
+        }
+      });
+      
+      // Send the query
+      engineWS.queryCandles(requestId, 'BTCUSD', resolutionMs, startMs, endMs);
+      setManualQueryStatus(`Query sent. Waiting for response...`);
+    } catch (err) {
+      setManualQueryStatus('Error: ' + (err instanceof Error ? err.message : String(err)));
+    }
+  };
   useEffect(() => {
     const updateWidth = () => {
       if (chartContainerRef.current) {
@@ -55,18 +145,21 @@ export function PriceChart() {
     return () => window.removeEventListener('resize', updateWidth);
   }, []);
 
-  // Update data bounds when events change
+  // Update data bounds when candles change
   useEffect(() => {
-    if (minTime && maxTime) {
-      console.log('[PriceChart] Data bounds:', {
+    if (candles.length > 0) {
+      const minTime = candles[0].time;
+      const maxTime = candles[candles.length - 1].time;
+      console.log('[PriceChart] Data bounds from candles:', {
         minTime,
         maxTime,
+        count: candles.length,
         minDate: new Date(minTime).toISOString(),
         maxDate: new Date(maxTime).toISOString(),
       });
+      setDataBounds(minTime, maxTime);
     }
-    setDataBounds(minTime, maxTime);
-  }, [minTime, maxTime, setDataBounds]);
+  }, [candles, setDataBounds]);
 
   // Debug: log viewport changes
   useEffect(() => {
@@ -86,52 +179,31 @@ export function PriceChart() {
     await engineWS.clearTicks();
   };
 
-  // Helper: snap a timestamp to the nearest candle boundary (1-second intervals)
-  // This allows trade markers to align with candles for rendering performance
-  // while preserving exact timestamps in the data for tooltips/details
-  const snapToCandle = (ms: number): number => {
-    const CANDLE_INTERVAL_MS = 1000;
-    return Math.round(ms / CANDLE_INTERVAL_MS) * CANDLE_INTERVAL_MS;
-  };
-
-  // Filter events by viewport and prepare chart data
+  // Filter candles by viewport and prepare chart data
   const chartData = useMemo(() => {
-    if (!viewportStartMs || !viewportEndMs || events.length === 0) {
+    if (!viewportStartMs || !viewportEndMs || candles.length === 0) {
       return [];
     }
 
-    // Get ticks in viewport
-    const visibleEvents = events.filter((e) => e.ms >= viewportStartMs && e.ms <= viewportEndMs);
+    // Get candles in viewport
+    const visibleCandles = candles.filter((c) => c.time >= viewportStartMs && c.time <= viewportEndMs);
     
-    // Convert ticks to chart data
-    let chartDataPoints = visibleEvents
-      .filter((e): e is TickEvent => e.type === 'tick')
-      .map((tick) => ({
-        ms: tick.ms,
-        time: new Date(tick.ms).toLocaleTimeString('en-US', { hour12: false }),
-        price: tick.price,
-        symbol: tick.symbol,
-      }));
-
-    // If no ticks but there are order fills, create synthetic points at order fill locations
-    // This ensures the Y-axis scales correctly and markers are visible
-    if (chartDataPoints.length === 0) {
-      const orderFills = visibleEvents.filter((e) => e.type === 'orderFilled');
-      if (orderFills.length > 0) {
-        chartDataPoints = orderFills.map((e: any) => ({
-          ms: snapToCandle(e.ms),  // Use snapped ms for chart data alignment
-          time: new Date(e.ms).toLocaleTimeString('en-US', { hour12: false }),
-          price: e.fillPrice,
-          symbol: e.symbol,
-        }));
-      }
-    }
-
-    // Silenced debug logging
-    // console.log('[PriceChart] chartData: ticks=', chartDataPoints.filter(d => d).length);
+    console.log('[PriceChart] Visible candles:', visibleCandles.length, 'of', candles.length);
+    
+    // Convert candles to chart data
+    const chartDataPoints = visibleCandles.map((candle) => ({
+      ms: candle.time,
+      time: new Date(candle.time).toLocaleTimeString('en-US', { hour12: false }),
+      price: candle.close, // Use close price for the line
+      open: candle.open,
+      high: candle.high,
+      low: candle.low,
+      close: candle.close,
+      volume: candle.volume,
+    }));
 
     return chartDataPoints;
-  }, [events, viewportStartMs, viewportEndMs, snapToCandle]);
+  }, [candles, viewportStartMs, viewportEndMs]);
 
   // Calculate time buckets for x-axis
   const timeBuckets = useMemo(() => {
@@ -150,34 +222,54 @@ export function PriceChart() {
     return (viewportStartMs - minTime < 100) && (maxTime - viewportEndMs < 100);
   }, [minTime, maxTime, viewportStartMs, viewportEndMs]);
 
-  // Prepare buy and sell order indicators
+  // Prepare buy and sell order indicators from QueryOrders data
   const buyOrders = useMemo(() => {
     if (!viewportStartMs || !viewportEndMs) return [];
 
-    const filled = events.filter((e) => e.type === 'orderFilled' && (e as any).side === 'Buy' && e.ms >= viewportStartMs && e.ms <= viewportEndMs);
-    const mapped = filled.map((e: any) => ({
-      ms: e.ms,
-      x: snapToCandle(e.ms),
-      y: e.fillPrice,
-      orderId: e.orderId,
-    }));
-    // Silenced: if (mapped.length > 0) { console.log('[PriceChart] Buy orders:', mapped.length); }
+    const filled = orders.filter((o) => 
+      o.status === 'FILLED' && 
+      o.side === 'Buy' && 
+      new Date(o.timestamp).getTime() >= viewportStartMs && 
+      new Date(o.timestamp).getTime() <= viewportEndMs
+    );
+    
+    const mapped = filled.map((o) => {
+      const ms = new Date(o.timestamp).getTime();
+      return {
+        ms: ms,
+        x: ms,
+        y: o.fillPrice || 0,
+        orderId: o.orderId,
+      };
+    });
+    
+    console.log('[PriceChart] Buy orders in viewport:', mapped.length);
     return mapped;
-  }, [events, viewportStartMs, viewportEndMs, snapToCandle]);
+  }, [orders, viewportStartMs, viewportEndMs]);
 
   const sellOrders = useMemo(() => {
     if (!viewportStartMs || !viewportEndMs) return [];
 
-    const filled = events.filter((e) => e.type === 'orderFilled' && (e as any).side === 'Sell' && e.ms >= viewportStartMs && e.ms <= viewportEndMs);
-    const mapped = filled.map((e: any) => ({
-      ms: e.ms,
-      x: snapToCandle(e.ms),
-      y: e.fillPrice,
-      orderId: e.orderId,
-    }));
-    // Silenced: if (mapped.length > 0) { console.log('[PriceChart] Sell orders:', mapped.length); }
+    const filled = orders.filter((o) => 
+      o.status === 'FILLED' && 
+      o.side === 'Sell' && 
+      new Date(o.timestamp).getTime() >= viewportStartMs && 
+      new Date(o.timestamp).getTime() <= viewportEndMs
+    );
+    
+    const mapped = filled.map((o) => {
+      const ms = new Date(o.timestamp).getTime();
+      return {
+        ms: ms,
+        x: ms,
+        y: o.fillPrice || 0,
+        orderId: o.orderId,
+      };
+    });
+    
+    console.log('[PriceChart] Sell orders in viewport:', mapped.length);
     return mapped;
-  }, [events, viewportStartMs, viewportEndMs, snapToCandle]);
+  }, [orders, viewportStartMs, viewportEndMs]);
 
   // Debug: silenced verbose rendering logs
   useEffect(() => {
@@ -239,8 +331,149 @@ export function PriceChart() {
               >
                 Clear
               </Button>
+              <Button
+                size="sm"
+                bg="blue.500"
+                color="white"
+                _hover={{ bg: 'blue.600' }}
+                onClick={() => setShowManualQuery(!showManualQuery)}
+                fontWeight="bold"
+              >
+                {showManualQuery ? 'Hide' : 'Query'}
+              </Button>
             </div>
           </div>
+          
+          {/* Manual Query Widget */}
+          {showManualQuery && (
+            <Box
+              mt={4}
+              p={4}
+              bg="gray.50"
+              borderRadius="md"
+              border="1px solid"
+              borderColor="gray.300"
+            >
+              <Heading size="sm" mb={3}>Manual Time Range & Resolution Query</Heading>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                  <div style={{ flex: 1, minWidth: '200px' }}>
+                    <Text fontSize="xs" fontWeight="bold" mb={1}>Start Date & Time</Text>
+                    <DatePicker
+                      selected={manualStartDate}
+                      onChange={(date: Date | null) => setManualStartDate(date)}
+                      showTimeSelect
+                      timeIntervals={1}
+                      dateFormat="MMM dd, yyyy HH:mm:ss"
+                      customInput={
+                        <Input
+                          size="sm"
+                          bg="white"
+                          cursor="pointer"
+                          readOnly
+                          _readOnly={{ bg: 'white', cursor: 'pointer' }}
+                        />
+                      }
+                    />
+                  </div>
+                  <div style={{ flex: 1, minWidth: '200px' }}>
+                    <Text fontSize="xs" fontWeight="bold" mb={1}>End Date & Time</Text>
+                    <DatePicker
+                      selected={manualEndDate}
+                      onChange={(date: Date | null) => setManualEndDate(date)}
+                      showTimeSelect
+                      timeIntervals={1}
+                      dateFormat="MMM dd, yyyy HH:mm:ss"
+                      customInput={
+                        <Input
+                          size="sm"
+                          bg="white"
+                          cursor="pointer"
+                          readOnly
+                          _readOnly={{ bg: 'white', cursor: 'pointer' }}
+                        />
+                      }
+                    />
+                  </div>
+                  <div>
+                    <Text fontSize="xs" fontWeight="bold" mb={1}>Resolution</Text>
+                    <select
+                      value={manualResolution}
+                      onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setManualResolution(e.target.value)}
+                      style={{
+                        padding: '6px 8px',
+                        borderRadius: '4px',
+                        border: '1px solid #cbd5e0',
+                        backgroundColor: 'white',
+                        fontSize: '14px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <option value="1000">1s</option>
+                      <option value="5000">5s</option>
+                      <option value="15000">15s</option>
+                      <option value="30000">30s</option>
+                      <option value="60000">1m</option>
+                      <option value="300000">5m</option>
+                      <option value="900000">15m</option>
+                      <option value="1800000">30m</option>
+                      <option value="3600000">1h</option>
+                      <option value="86400000">1d</option>
+                    </select>
+                  </div>
+                  <div>
+                    <Text fontSize="xs" fontWeight="bold" mb={1}>Timezone</Text>
+                    <select
+                      value={timezone}
+                      onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setTimezone(e.target.value)}
+                      style={{
+                        padding: '6px 8px',
+                        borderRadius: '4px',
+                        border: '1px solid #cbd5e0',
+                        backgroundColor: 'white',
+                        fontSize: '14px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <option value="UTC">UTC</option>
+                      <option value="EST">EST (UTC-5)</option>
+                      <option value="CST">CST (UTC-6)</option>
+                      <option value="MST">MST (UTC-7)</option>
+                      <option value="PST">PST (UTC-8)</option>
+                      <option value="GMT">GMT (UTC+0)</option>
+                      <option value="CET">CET (UTC+1)</option>
+                      <option value="EET">EET (UTC+2)</option>
+                      <option value="JST">JST (UTC+9)</option>
+                      <option value="AEST">AEST (UTC+10)</option>
+                    </select>
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  bg="green.500"
+                  color="white"
+                  _hover={{ bg: 'green.600' }}
+                  onClick={handleManualQuery}
+                  fontWeight="bold"
+                >
+                  Query
+                </Button>
+                {manualQueryStatus && (
+                  <Box
+                    p={2}
+                    bg="white"
+                    borderRadius="md"
+                    border="1px solid"
+                    borderColor="gray.300"
+                    fontSize="xs"
+                    fontFamily="monospace"
+                  >
+                    {manualQueryStatus}
+                  </Box>
+                )}
+              </div>
+            </Box>
+          )}
           <Text fontSize="xs" color="gray.600">
             Scroll to zoom • Ctrl+Drag to pan •{' '}
             {!isViewingAllData && (
@@ -258,7 +491,7 @@ export function PriceChart() {
                   marginLeft: '4px'
                 }}
               >
-                {autoScroll ? '🔴 Following' : '⚪ Not Following'}
+                {autoScroll ? '🔴 Following (polling active)' : '⚪ Not Following (polling paused)'}
               </button>
             )}
             {isViewingAllData && <span>Viewing all data</span>}

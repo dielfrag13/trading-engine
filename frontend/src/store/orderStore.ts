@@ -18,12 +18,16 @@ export type Order = {
 type OrderState = {
   orders: Order[];
   positions: Map<string, Position>;
+  startingBalance: number | null;
   addOrder: (order: Order) => void;
   updateOrderStatus: (orderId: number, status: OrderStatus, filledQty?: number, fillPrice?: number) => void;
   rejectOrder: (orderId: number, reason: string) => void;
   updatePosition: (symbol: string, qty: number, avgPrice: number) => void;
   getPosition: (symbol: string) => Position | null;
   clearOrders: () => void;
+  setStartingBalance: (balance: number) => void;
+  setOrders: (orders: Order[]) => void;
+  setPositions: (positions: Map<string, Position>) => void;
   getFilledOrders: () => Order[];
   getUnrealizedPnL: (currentPrice: number) => number;
   getAllPositions: () => Position[];
@@ -40,6 +44,7 @@ export type Position = {
 export const useOrderStore = create<OrderState>((set, get) => ({
   orders: [],
   positions: new Map(),
+  startingBalance: null, // Will be set by RunStart message from backend
 
   addOrder: (order: Order) =>
     set((state) => {
@@ -117,4 +122,10 @@ export const useOrderStore = create<OrderState>((set, get) => ({
   },
 
   clearOrders: () => set({ orders: [], positions: new Map() }),
+
+  setStartingBalance: (balance: number) => set({ startingBalance: balance }),
+
+  setOrders: (orders: Order[]) => set({ orders }),
+
+  setPositions: (positions: Map<string, Position>) => set({ positions }),
 }));

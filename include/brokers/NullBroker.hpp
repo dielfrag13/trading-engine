@@ -27,6 +27,12 @@ public:
 
     eng::PriceData get_current_price(const std::string& symbol) override;
 
+    // Get all current positions (symbol -> quantity)
+    std::unordered_map<std::string, double> get_positions() const;
+
+    // Get all orders (including historical)
+    std::vector<eng::Order> get_orders() const;
+
     /*
     void subscribe_to_ticks(const std::string& symbol,
                             std::function<void(const eng::PriceData&)> cb) override;
@@ -36,7 +42,8 @@ private:
     eng::EventBus* bus_{nullptr};
     double balance_;
     std::unordered_map<std::string, double> positions_;  // track qty held per symbol
-    std::mutex mutex_;
+    std::vector<eng::Order> orders_;                      // track all orders (history)
+    mutable std::mutex mutex_;
     uint64_t next_order_id_{1};
     
     // Helper to generate unique order IDs

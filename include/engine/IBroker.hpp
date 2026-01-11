@@ -3,6 +3,9 @@
 #include <string>
 #include <functional>
 #include <memory>
+#include <vector>
+#include <unordered_map>
+#include <unordered_map>
 
 /*
 the interface in which brokers -- the classes that perform orders, check account balances, etc -- inherit.
@@ -33,6 +36,18 @@ public:
     }
     virtual double get_balance() = 0;
     virtual PriceData get_current_price(const std::string& symbol) = 0;
+    
+    // Get all current positions (symbol -> quantity)
+    // Default implementation returns empty map for brokers that don't track positions
+    virtual std::unordered_map<std::string, double> get_positions() const {
+        return {};
+    }
+
+    // Get all orders (including historical)
+    // Default implementation returns empty vector for brokers that don't track orders
+    virtual std::vector<Order> get_orders() const {
+        return {};
+    }
     /*
     virtual void subscribe_to_ticks(const std::string& symbol,
                                     std::function<void(const PriceData&)> cb) = 0;
