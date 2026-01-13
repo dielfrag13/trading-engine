@@ -51,6 +51,9 @@ export function PriceChart() {
   // Track container width for responsive buckets
   const [containerWidth, setContainerWidth] = useState(0);
   
+  // Track hovered marker for custom tooltip
+  const [hoveredMarker, setHoveredMarker] = useState<{ type: 'buy' | 'sell', orderId: number, ms: number, price: number } | null>(null);
+  
   // Manual query widget state
   const [showManualQuery, setShowManualQuery] = useState(false);
   const [manualStartDate, setManualStartDate] = useState<Date | null>(null);
@@ -226,6 +229,12 @@ export function PriceChart() {
   const buyOrders = useMemo(() => {
     if (!viewportStartMs || !viewportEndMs) return [];
 
+    // Detect candle resolution from chartData
+    let resolutionMs = 1000; // Default to 1 second
+    if (chartData.length >= 2) {
+      resolutionMs = chartData[1].ms - chartData[0].ms;
+    }
+
     const filled = orders.filter((o) => 
       o.status === 'FILLED' && 
       o.side === 'Buy' && 
@@ -234,21 +243,29 @@ export function PriceChart() {
     );
     
     const mapped = filled.map((o) => {
-      const ms = new Date(o.timestamp).getTime();
+      const orderMs = new Date(o.timestamp).getTime();
+      // Snap order timestamp to nearest candle bucket
+      const snappedMs = Math.floor(orderMs / resolutionMs) * resolutionMs;
       return {
-        ms: ms,
-        x: ms,
+        ms: orderMs, // Keep original for uniqueness
+        x: snappedMs, // Use snapped timestamp for x-axis positioning
         y: o.fillPrice || 0,
         orderId: o.orderId,
       };
     });
     
-    console.log('[PriceChart] Buy orders in viewport:', mapped.length);
+    console.log('[PriceChart] Buy orders in viewport:', mapped.length, 'at resolution:', resolutionMs + 'ms');
     return mapped;
-  }, [orders, viewportStartMs, viewportEndMs]);
+  }, [orders, viewportStartMs, viewportEndMs, chartData]);
 
   const sellOrders = useMemo(() => {
     if (!viewportStartMs || !viewportEndMs) return [];
+
+    // Detect candle resolution from chartData
+    let resolutionMs = 1000; // Default to 1 second
+    if (chartData.length >= 2) {
+      resolutionMs = chartData[1].ms - chartData[0].ms;
+    }
 
     const filled = orders.filter((o) => 
       o.status === 'FILLED' && 
@@ -258,18 +275,20 @@ export function PriceChart() {
     );
     
     const mapped = filled.map((o) => {
-      const ms = new Date(o.timestamp).getTime();
+      const orderMs = new Date(o.timestamp).getTime();
+      // Snap order timestamp to nearest candle bucket
+      const snappedMs = Math.floor(orderMs / resolutionMs) * resolutionMs;
       return {
-        ms: ms,
-        x: ms,
+        ms: orderMs, // Keep original for uniqueness
+        x: snappedMs, // Use snapped timestamp for x-axis positioning
         y: o.fillPrice || 0,
         orderId: o.orderId,
       };
     });
     
-    console.log('[PriceChart] Sell orders in viewport:', mapped.length);
+    console.log('[PriceChart] Sell orders in viewport:', mapped.length, 'at resolution:', resolutionMs + 'ms');
     return mapped;
-  }, [orders, viewportStartMs, viewportEndMs]);
+  }, [orders, viewportStartMs, viewportEndMs, chartData]);
 
   // Debug: silenced verbose rendering logs
   useEffect(() => {
@@ -531,36 +550,136 @@ export function PriceChart() {
                 width={55}
               />
               <Tooltip
+                wrapperStyle={{
+                  zIndex: 9999,
+                  opacity: 1,
+                }}
                 contentStyle={{
-                  backgroundColor: 'rgba(255, 255, 255, 0.95)',
-                  border: '1px solid #ccc',
+                  backgroundColor: '#FF1493',
+                  border: '2px solid #333',
                   borderRadius: '4px',
                   padding: '8px',
+                  maxHeight: '400px',
+                  overflowY: 'auto',
+                  boxShadow: '0 4px 6px rgba(0, 0, 0, 0.3)',
+                  opacity: 1,
                 }}
                 content={({ active, payload }) => {
                   if (active && payload && payload.length) {
                     const data = payload[0].payload;
-                    // Find order fill at this timestamp
-                    const orderFill = events.find((e) => e.type === 'orderFilled' && e.ms === data.ms) as any;
+                    
+                    // If hovering over a marker, show only that marker's info
+                    if (hoveredMarker) {
+                      const order = orders.find(o => o.orderId === hoveredMarker.orderId);
+                      const orderTime = new Date(hoveredMarker.ms);
+                      const timeStr = orderTime.toLocaleTimeString('en-US', { 
+                        hour12: false, 
+                        hour: '2-digit', 
+                        minute: '2-digit', 
+                        second: '2-digit' 
+                      }) + '.' + orderTime.getMilliseconds().toString().padStart(3, '0');
+                      
+                      return (
+                        <div style={{ 
+                          color: '#000',
+                          backgroundColor: '#ffffff',
+                          padding: '8px',
+                          borderRadius: '4px',
+                          border: '2px solid #333',
+                          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.3)',
+                        }}>
+                          <p style={{ margin: '0 0 4px 0', fontWeight: 'bold', borderBottom: '1px solid #ccc', paddingBottom: '4px' }}>
+                            {hoveredMarker.type === 'buy' ? '🟢 BUY FILL' : '🔴 SELL FILL'}
+                          </p>
+                          <p style={{ margin: '0 0 4px 0', fontSize: '11px', color: '#666' }}>
+                            Time: {timeStr}
+                          </p>
+                          <p style={{ margin: '0 0 4px 0', fontWeight: 'bold' }}>
+                            Price: ${hoveredMarker.price.toFixed(2)}
+                          </p>
+                          <p style={{ margin: '0 0 4px 0', color: '#666' }}>
+                            Qty: {order?.filledQty?.toFixed(4) || '?'}
+                          </p>
+                          <p style={{ margin: '0', fontWeight: 'bold', color: hoveredMarker.type === 'buy' ? '#e53e3e' : '#48bb78' }}>
+                            {hoveredMarker.type === 'buy' ? '−' : '+'} ${((order?.filledQty || 0) * hoveredMarker.price).toFixed(2)}
+                          </p>
+                        </div>
+                      );
+                    }
+                    
+                    // Find all buy and sell orders at this candle's timestamp
+                    const buysAtTimestamp = buyOrders.filter(o => o.x === data.ms);
+                    const sellsAtTimestamp = sellOrders.filter(o => o.x === data.ms);
+                    
                     return (
-                      <div style={{ color: '#000' }}>
-                        <p style={{ margin: '0 0 4px 0' }}>
+                      <div style={{ 
+                        color: '#000',
+                        backgroundColor: '#ffffff',
+                        padding: '8px',
+                        borderRadius: '4px',
+                        border: '2px solid #333',
+                        boxShadow: '0 4px 6px rgba(0, 0, 0, 0.3)',
+                      }}>
+                        <p style={{ margin: '0 0 4px 0', fontWeight: 'bold', borderBottom: '1px solid #ccc', paddingBottom: '4px' }}>
                           {data.time}
                         </p>
-                        <p style={{ margin: '0', fontWeight: 'bold', color: '#3182ce' }}>
+                        <p style={{ margin: '0 0 8px 0', fontWeight: 'bold', color: '#3182ce' }}>
                           Price: ${(data.price ?? 0).toFixed(2)}
                         </p>
-                        {orderFill && orderFill.side && (
+                        
+                        {/* Buy fills */}
+                        {buysAtTimestamp.length > 0 && (
                           <>
-                            <p style={{ margin: '4px 0 2px 0', fontSize: '11px', color: '#e53e3e', fontWeight: 'bold' }}>
-                              {orderFill.side === 'Buy' ? '🟢' : '🔴'} {orderFill.side?.toUpperCase()} @ ${(orderFill.fillPrice ?? 0).toFixed(2)}
+                            <p style={{ margin: '0 0 4px 0', fontSize: '11px', fontWeight: 'bold', color: '#48bb78' }}>
+                              🟢 BUY FILLS ({buysAtTimestamp.length})
                             </p>
-                            <p style={{ margin: '2px 0 0 0', fontSize: '10px', color: '#666' }}>
-                              Qty: {(orderFill.filledQty ?? 0).toFixed(4)}
+                            {buysAtTimestamp.map((order, idx) => {
+                              const orderTime = new Date(order.ms);
+                              const timeStr = orderTime.toLocaleTimeString('en-US', { 
+                                hour12: false, 
+                                hour: '2-digit', 
+                                minute: '2-digit', 
+                                second: '2-digit' 
+                              }) + '.' + orderTime.getMilliseconds().toString().padStart(3, '0');
+                              
+                              return (
+                                <div key={`buy-${order.orderId}-${idx}`} style={{ marginLeft: '8px', marginBottom: '6px', fontSize: '10px' }}>
+                                  <div style={{ fontWeight: 'bold' }}>@ ${order.y.toFixed(2)}</div>
+                                  <div style={{ color: '#666' }}>Qty: {orders.find(o => o.orderId === order.orderId)?.filledQty?.toFixed(4) || '?'} at {timeStr}</div>
+                                  <div style={{ color: '#e53e3e', fontWeight: 'bold' }}>
+                                    − ${((orders.find(o => o.orderId === order.orderId)?.filledQty || 0) * order.y).toFixed(2)}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </>
+                        )}
+                        
+                        {/* Sell fills */}
+                        {sellsAtTimestamp.length > 0 && (
+                          <>
+                            <p style={{ margin: '8px 0 4px 0', fontSize: '11px', fontWeight: 'bold', color: '#f56565' }}>
+                              🔴 SELL FILLS ({sellsAtTimestamp.length})
                             </p>
-                            <p style={{ margin: '2px 0 0 0', fontSize: '10px', color: orderFill.side === 'Buy' ? '#e53e3e' : '#48bb78', fontWeight: 'bold' }}>
-                              {orderFill.side === 'Buy' ? '−' : '+'} ${(Math.abs((orderFill.filledQty ?? 0) * (orderFill.fillPrice ?? 0))).toFixed(2)}
-                            </p>
+                            {sellsAtTimestamp.map((order, idx) => {
+                              const orderTime = new Date(order.ms);
+                              const timeStr = orderTime.toLocaleTimeString('en-US', { 
+                                hour12: false, 
+                                hour: '2-digit', 
+                                minute: '2-digit', 
+                                second: '2-digit' 
+                              }) + '.' + orderTime.getMilliseconds().toString().padStart(3, '0');
+                              
+                              return (
+                                <div key={`sell-${order.orderId}-${idx}`} style={{ marginLeft: '8px', marginBottom: '6px', fontSize: '10px' }}>
+                                  <div style={{ fontWeight: 'bold' }}>@ ${order.y.toFixed(2)}</div>
+                                  <div style={{ color: '#666' }}>Qty: {orders.find(o => o.orderId === order.orderId)?.filledQty?.toFixed(4) || '?'} at {timeStr}</div>
+                                  <div style={{ color: '#48bb78', fontWeight: 'bold' }}>
+                                    + ${((orders.find(o => o.orderId === order.orderId)?.filledQty || 0) * order.y).toFixed(2)}
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </>
                         )}
                       </div>
@@ -604,6 +723,8 @@ export function PriceChart() {
                   fill="#48bb78"
                   stroke="#2f855a"
                   strokeWidth={2}
+                  onMouseEnter={() => setHoveredMarker({ type: 'buy', orderId: order.orderId, ms: order.ms, price: order.y })}
+                  onMouseLeave={() => setHoveredMarker(null)}
                 />
               ))}
 
@@ -617,6 +738,8 @@ export function PriceChart() {
                   fill="#f56565"
                   stroke="#c53030"
                   strokeWidth={2}
+                  onMouseEnter={() => setHoveredMarker({ type: 'sell', orderId: order.orderId, ms: order.ms, price: order.y })}
+                  onMouseLeave={() => setHoveredMarker(null)}
                 />
               ))}
             </ComposedChart>
