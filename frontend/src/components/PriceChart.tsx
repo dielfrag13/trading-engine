@@ -54,6 +54,10 @@ export function PriceChart() {
   // Track hovered marker for custom tooltip
   const [hoveredMarker, setHoveredMarker] = useState<{ type: 'buy' | 'sell', orderId: number, ms: number, price: number } | null>(null);
   
+  // Toggle visibility of buy/sell markers
+  const [showBuyMarkers, setShowBuyMarkers] = useState(true);
+  const [showSellMarkers, setShowSellMarkers] = useState(true);
+  
   // Manual query widget state
   const [showManualQuery, setShowManualQuery] = useState(false);
   const [manualStartDate, setManualStartDate] = useState<Date | null>(null);
@@ -254,9 +258,22 @@ export function PriceChart() {
       };
     });
     
-    console.log('[PriceChart] Buy orders in viewport:', mapped.length, 'at resolution:', resolutionMs + 'ms');
-    return mapped;
-  }, [orders, viewportStartMs, viewportEndMs, chartData]);
+    // Smart downsampling to avoid rendering thousands of markers
+    // Calculate maximum markers based on container width
+    const maxMarkers = Math.min(500, Math.max(50, Math.floor(containerWidth / 4))); // Max 500 markers
+    
+    if (mapped.length <= maxMarkers) {
+      console.log('[PriceChart] Buy orders in viewport:', mapped.length, 'at resolution:', resolutionMs + 'ms');
+      return mapped;
+    }
+    
+    // Downsample: take evenly spaced samples across the time range
+    const step = Math.ceil(mapped.length / maxMarkers);
+    const downsampled = mapped.filter((_, idx) => idx % step === 0);
+    
+    console.log('[PriceChart] Buy orders downsampled:', mapped.length, '→', downsampled.length, 'at resolution:', resolutionMs + 'ms');
+    return downsampled;
+  }, [orders, viewportStartMs, viewportEndMs, chartData, containerWidth]);
 
   const sellOrders = useMemo(() => {
     if (!viewportStartMs || !viewportEndMs) return [];
@@ -286,9 +303,22 @@ export function PriceChart() {
       };
     });
     
-    console.log('[PriceChart] Sell orders in viewport:', mapped.length, 'at resolution:', resolutionMs + 'ms');
-    return mapped;
-  }, [orders, viewportStartMs, viewportEndMs, chartData]);
+    // Smart downsampling to avoid rendering thousands of markers
+    // Calculate maximum markers based on container width
+    const maxMarkers = Math.min(500, Math.max(50, Math.floor(containerWidth / 4))); // Max 500 markers
+    
+    if (mapped.length <= maxMarkers) {
+      console.log('[PriceChart] Sell orders in viewport:', mapped.length, 'at resolution:', resolutionMs + 'ms');
+      return mapped;
+    }
+    
+    // Downsample: take evenly spaced samples across the time range
+    const step = Math.ceil(mapped.length / maxMarkers);
+    const downsampled = mapped.filter((_, idx) => idx % step === 0);
+    
+    console.log('[PriceChart] Sell orders downsampled:', mapped.length, '→', downsampled.length, 'at resolution:', resolutionMs + 'ms');
+    return downsampled;
+  }, [orders, viewportStartMs, viewportEndMs, chartData, containerWidth]);
 
   // Debug: silenced verbose rendering logs
   useEffect(() => {
@@ -714,7 +744,7 @@ export function PriceChart() {
               />
 
               {/* Buy order markers */}
-              {buyOrders.map((order) => (
+              {showBuyMarkers && buyOrders.map((order) => (
                 <ReferenceDot
                   key={`buy-${order.orderId}-${order.ms}`}
                   x={order.x}
@@ -729,7 +759,7 @@ export function PriceChart() {
               ))}
 
               {/* Sell order markers */}
-              {sellOrders.map((order) => (
+              {showSellMarkers && sellOrders.map((order) => (
                 <ReferenceDot
                   key={`sell-${order.orderId}-${order.ms}`}
                   x={order.x}
@@ -745,6 +775,32 @@ export function PriceChart() {
             </ComposedChart>
             </ResponsiveContainer>
           )}
+          
+          {/* Marker visibility toggles */}
+          <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginTop: '12px' }}>
+            <Button
+              size="sm"
+              bg={showBuyMarkers ? 'green.500' : 'gray.300'}
+              color="white"
+              _hover={{ bg: showBuyMarkers ? 'green.600' : 'gray.400' }}
+              onClick={() => setShowBuyMarkers(!showBuyMarkers)}
+              fontWeight="bold"
+              fontSize="xs"
+            >
+              🟢 {showBuyMarkers ? 'Hide' : 'Show'} Buy Orders
+            </Button>
+            <Button
+              size="sm"
+              bg={showSellMarkers ? 'red.500' : 'gray.300'}
+              color="white"
+              _hover={{ bg: showSellMarkers ? 'red.600' : 'gray.400' }}
+              onClick={() => setShowSellMarkers(!showSellMarkers)}
+              fontWeight="bold"
+              fontSize="xs"
+            >
+              🔴 {showSellMarkers ? 'Hide' : 'Show'} Sell Orders
+            </Button>
+          </div>
         </div>
       </Card.Body>
     </Card.Root>
