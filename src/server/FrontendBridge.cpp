@@ -11,6 +11,8 @@ FrontendBridge::FrontendBridge(eng::EventBus& bus, eng::IBroker& broker, int por
   // Initialize persistent candle store (shared with CandlePersister)
   eng::CandleStoreConfig config;
   config.db_path = "backtest.db";
+  config.candle_buffer_size = 100;  // Smaller buffer for frequent flushes (live-ready)
+  config.event_buffer_size = 100;   // Match candle buffer size
   candle_store_ = std::make_shared<eng::CandleStore>(config);
 }
 

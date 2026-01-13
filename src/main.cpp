@@ -124,7 +124,8 @@ int main(int argc, char* argv[]) {
   std::cout << "[Main] Starting replay...\n";
   auto engine_ptr = engine.get();
   auto adapter_ptr = kraken_adapter_ptr;
-  std::thread replay_thread([engine_ptr, adapter_ptr, &data_file]() {
+  auto persister_ptr = persister.get();
+  std::thread replay_thread([engine_ptr, adapter_ptr, persister_ptr, &data_file]() {
     std::this_thread::sleep_for(std::chrono::seconds(5));  // Wait for frontend WebSocket connection
     std::cout << "[Main] Replaying trades from: " << data_file << "\n";
     size_t trades_replayed = adapter_ptr->replay(
@@ -133,7 +134,12 @@ int main(int argc, char* argv[]) {
         nullptr  // on_trade callback (optional, use subscriptions instead)
     );
     std::cout << "[Main] Replayed " << trades_replayed << " trades.\n";
-    std::cout << "[Main] Replay complete. Engine staying open - press Ctrl+C to exit.\n";
+    
+    // Flush all pending candles to database after replay completes
+    // This ensures deterministic behavior: all replay data is persisted before queries begin
+    std::cout << "[Main] Replay complete. Flushing all pending candles to database...\n";
+    persister_ptr->flush_pending_data();
+    std::cout << "[Main] All candles flushed. Engine staying open - press Ctrl+C to exit.\n";
   });
   replay_thread.detach();
 

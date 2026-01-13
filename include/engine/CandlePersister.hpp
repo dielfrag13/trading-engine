@@ -6,6 +6,9 @@
 #include <unordered_map>
 #include <memory>
 #include <chrono>
+#include <sstream>
+#include <iomanip>
+#include <iostream>
 
 namespace eng {
 
@@ -44,6 +47,9 @@ public:
     void start() {
         if (running_) return;
         running_ = true;
+        
+        // Initialize flush timer
+        last_flush_time_ = std::chrono::steady_clock::now();
 
         // Subscribe to TradePrint events on the bus
         bus_.subscribe("TradePrint", [this](const Event& ev) {
@@ -70,6 +76,17 @@ public:
         }
     }
 
+    /**
+     * Flush all pending candles to database.
+     * Called after replay completes to ensure deterministic data persistence.
+     */
+    void flush_pending_data() {
+        persist_all_pending();
+        if (store_) {
+            store_->flush_all();
+        }
+    }
+
 private:
     struct CandleBuffer {
         double open{0.0};
@@ -91,6 +108,10 @@ private:
     
     // Track the current bucket time per symbol
     std::unordered_map<std::string, long> current_buckets_;
+    
+    // Time-based flush tracking
+    std::chrono::steady_clock::time_point last_flush_time_;
+    static constexpr int FLUSH_TIMEOUT_MS = 5000;  // Flush after 5 seconds of inactivity
 
     /**
      * Snap a TimePoint to the nearest interval boundary.
@@ -110,6 +131,7 @@ private:
 
     /**
      * Persist the current candle for a symbol if it has data.
+     * Also triggers time-based flush if timeout elapsed.
      */
     void persist_candle_for_symbol(const std::string& symbol) {
         auto it = current_candles_.find(symbol);
@@ -125,9 +147,42 @@ private:
                 .volume = buf.volume
             };
 
+            // Log candle details before persisting
+            auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                candle.open_time.time_since_epoch()).count();
+            auto time_t_val = std::chrono::system_clock::to_time_t(candle.open_time);
+            std::ostringstream time_str;
+            time_str << std::put_time(std::gmtime(&time_t_val), "%m/%d/%Y %H:%M:%S");
+            std::cout << "[CandlePersister] Persisting candle: symbol=" << symbol 
+                      << " time=" << time_str.str() << " (ms=" << ms << ")"
+                      << " O=" << candle.open << " H=" << candle.high 
+                      << " L=" << candle.low << " C=" << candle.close 
+                      << " V=" << candle.volume << "\n";
+            std::cout << "[CandlePersister] Added to buffer (will flush when buffer full or timeout)\n";
+
             // Write directly to database (buffered with automatic flushing)
             if (store_) {
                 store_->add_candle(symbol, interval_ms_, candle, "backtest");
+            }
+            
+            // Mark this candle as persisted so we don't try to persist it again
+            buf.has_data = false;
+            
+            // Check if we should flush based on time elapsed
+            auto now = std::chrono::steady_clock::now();
+            auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                now - last_flush_time_).count();
+            
+            if (elapsed_ms >= FLUSH_TIMEOUT_MS) {
+                if (store_) {
+                    store_->flush_all();
+                    std::cout << "[CandlePersister] Time-based flush triggered after " 
+                              << elapsed_ms << "ms\n";
+                }
+                last_flush_time_ = now;
+            } else {
+                std::cout << "[CandlePersister] Time since last flush: " << elapsed_ms 
+                          << "ms (threshold: " << FLUSH_TIMEOUT_MS << "ms)\n";
             }
         }
     }

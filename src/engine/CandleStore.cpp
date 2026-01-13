@@ -147,7 +147,9 @@ void CandleStore::add_candle(const std::string& symbol, long long resolution_ms,
                              const Candle& candle, const std::string& source) {
   {
     std::lock_guard<std::mutex> lock(buffer_mutex_);
+    // append a copy of a candle to the write_buffer.
     candles_write_buffer_.push_back({symbol, candle});
+    // why do we track separate resolutions?
     candles_resolution_buffer_.push_back({resolution_ms, symbol});
   }
 

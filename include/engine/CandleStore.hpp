@@ -33,8 +33,8 @@ using json = nlohmann::json;
 
 struct CandleStoreConfig {
   std::string db_path{"backtest.db"};
-  size_t candle_buffer_size{50000};   // Flush candles when buffer reaches this size
-  size_t event_buffer_size{50000};    // Flush events when buffer reaches this size
+  size_t candle_buffer_size{20};   // Flush candles when buffer reaches this size
+  size_t event_buffer_size{20};    // Flush events when buffer reaches this size
   size_t max_candle_cache_entries{100};  // LRU limit for candle queries
   size_t max_event_cache_entries{100};   // LRU limit for event queries
 };
