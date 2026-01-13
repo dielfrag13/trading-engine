@@ -39,6 +39,12 @@ include_directories(${PROJECT_SOURCE_DIR}/include)
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
+# zlib for gzip decompression (used by KrakenFileReplayAdapter)
+find_package(ZLIB REQUIRED)
+
+# SQLite3 for persistent candle/event storage
+find_package(SQLite3 REQUIRED)
+
 # WebSocket++ (header-only, but needs asio)
 find_package(websocketpp QUIET)
 if(NOT websocketpp_FOUND)
@@ -82,6 +88,7 @@ target_link_libraries(trading_engine
 		strategies_lib
 		server
 		Threads::Threads		# sets flags accordingly accross platforms. Don't hardcode -lpthread, that's a linux thing. 
+		ZLIB::ZLIB			# for gzip decompression in KrakenFileReplayAdapter
 		eng_build_config
 )
 
